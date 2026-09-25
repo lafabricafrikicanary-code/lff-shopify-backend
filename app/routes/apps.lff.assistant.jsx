@@ -10,6 +10,16 @@ async function bodyData(request) {
   return Object.fromEntries(formData);
 }
 
+export const loader = async ({ request }) => {
+  await authenticate.public.appProxy(request);
+
+  return Response.json({
+    ok: true,
+    service: "lff-assistant",
+    message: "LFF assistant app proxy is ready. Send POST with a message.",
+  });
+};
+
 export const action = async ({ request }) => {
   await authenticate.public.appProxy(request);
 
