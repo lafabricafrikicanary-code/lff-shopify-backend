@@ -2,7 +2,7 @@
   "name": "open-claw-backend-lff",
   "private": true,
   "scripts": {
-    "build": "react-router build",
+    "build": "react-router build && mkdir -p dist/server && cp build/server/index.js dist/server/index.js",
     "dev": "shopify app dev",
     "config:link": "shopify app config link",
     "generate": "shopify app generate",
