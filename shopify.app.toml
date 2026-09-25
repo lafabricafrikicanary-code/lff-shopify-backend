@@ -1,14 +1,14 @@
 # This file stores configurations for your Shopify app.
 client_id = "62b68f5e3b3a348d914e98db544f3bdd"
 name = "OpenClaw Backend LFF"
-application_url = "https://backend.lafabricafriki.es"
+application_url = "https://lff-shopify-backend.onrender.com"
 embedded = true
 
 [auth]
 redirect_urls = [
-  "https://backend.lafabricafriki.es/auth/callback",
-  "https://backend.lafabricafriki.es/auth/shopify/callback",
-  "https://backend.lafabricafriki.es/api/auth/callback"
+  "https://lff-shopify-backend.onrender.com/auth/callback",
+  "https://lff-shopify-backend.onrender.com/auth/shopify/callback",
+  "https://lff-shopify-backend.onrender.com/api/auth/callback"
 ]
 
 [access_scopes]
