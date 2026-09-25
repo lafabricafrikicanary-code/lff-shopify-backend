@@ -42,9 +42,9 @@ Estas variables deben existir en el servidor publico donde se despliegue la app:
 ```sh
 SHOPIFY_API_KEY=62b68f5e3b3a348d914e98db544f3bdd
 SHOPIFY_API_SECRET=<secret de la app Shopify>
-SHOPIFY_APP_URL=https://lff-shopify-backend.adept-sugar-9802.chatgpt.site
+SHOPIFY_APP_URL=https://backend.lafabricafriki.es
 SCOPES=read_customers,write_customers,read_price_rules,write_price_rules,read_discounts,write_discounts,read_draft_orders,write_draft_orders,read_inventory,read_metaobjects,write_metaobjects,read_orders,write_orders,read_products,write_app_proxy
-DATABASE_URL=<base de datos persistente>
+DATABASE_URL=file:/data/prod.sqlite
 NODE_ENV=production
 ```
 
@@ -54,9 +54,9 @@ NODE_ENV=production
 ## Pendiente obligatorio antes de decir "finalizado"
 
 1. Desplegar este backend en una URL HTTPS publica y estable.
-   - URL preparada en Sites: `https://lff-shopify-backend.adept-sugar-9802.chatgpt.site`
+   - URL preparada para Oracle: `https://backend.lafabricafriki.es`
 2. Cambiar `application_url` y `auth.redirect_urls` en `shopify.app.toml` a esa URL.
-   - Hecho para la URL de Sites anterior.
+   - Hecho para `https://backend.lafabricafriki.es`.
 3. Ejecutar `npm run deploy` para publicar configuracion, scopes, webhooks y app proxy en Shopify.
 4. Reinstalar/actualizar la app en la tienda si Shopify lo solicita.
 5. Probar en Shopify Admin que `/app` abre el panel LFF, no `lafabricafriki.es`.
@@ -64,6 +64,16 @@ NODE_ENV=production
 7. Realizar pedido de prueba con codigo comercial y comprobar atribucion + comision pendiente.
 8. Probar cancelacion/refund y comprobar marcado de comisiones para revision.
 9. Conectar el tema/Arcade al app proxy `/apps/lff/arcade/redeem`.
+
+## Despliegue Oracle Always Free
+
+El despliegue preparado esta en `deploy/oracle/`:
+
+- `docker-compose.yml`: backend Shopify, Caddy HTTPS y Ollama.
+- `install-vm.sh`: instala Docker, Compose y firewall basico en Ubuntu.
+- `.env.example`: variables necesarias sin secretos reales.
+- `Caddyfile`: HTTPS automatico para `backend.lafabricafriki.es`.
+- `pull-ollama-model.sh`: descarga el modelo visual inicial para busqueda por imagen.
 
 ## Nota de seguridad
 

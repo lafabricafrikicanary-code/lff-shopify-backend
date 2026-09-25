@@ -1,0 +1,49 @@
+services:
+  lff-backend:
+    build:
+      context: ../..
+    container_name: lff-backend
+    restart: unless-stopped
+    env_file:
+      - /opt/lff/.env
+    volumes:
+      - lff-data:/data
+    depends_on:
+      - ollama
+    networks:
+      - lff
+
+  caddy:
+    image: caddy:2-alpine
+    container_name: lff-caddy
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    depends_on:
+      - lff-backend
+    networks:
+      - lff
+
+  ollama:
+    image: ollama/ollama:latest
+    container_name: lff-ollama
+    restart: unless-stopped
+    volumes:
+      - ollama-data:/root/.ollama
+    networks:
+      - lff
+
+networks:
+  lff:
+    driver: bridge
+
+volumes:
+  lff-data:
+  caddy-data:
+  caddy-config:
+  ollama-data:
