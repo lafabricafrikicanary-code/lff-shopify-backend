@@ -13,11 +13,14 @@ async function bodyData(request) {
 export const loader = async ({ request }) => {
   await authenticate.public.appProxy(request);
 
-  return Response.json({
-    ok: true,
-    service: "lff-assistant",
-    message: "LFF assistant app proxy is ready. Send POST with a message.",
-  });
+  return new Response(
+    "<!doctype html><meta charset=\"utf-8\"><title>LFF Assistant OK</title><body style=\"font-family:system-ui;padding:24px\"><h1>LFF Assistant OK</h1><p>El App Proxy del asistente esta conectado. El chat real enviara mensajes por POST desde el theme.</p></body>",
+    {
+      headers: {
+        "Content-Type": "text/html; charset=utf-8",
+      },
+    },
+  );
 };
 
 export const action = async ({ request }) => {
