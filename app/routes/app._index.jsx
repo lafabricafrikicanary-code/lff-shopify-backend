@@ -1,337 +1,364 @@
-import { useEffect } from "react";
-import { useFetcher } from "react-router";
-import { useAppBridge } from "@shopify/app-bridge-react";
+/* eslint-disable react/prop-types */
+import {
+  Form,
+  useActionData,
+  useLoaderData,
+  useNavigation,
+  useRouteError,
+} from "react-router";
 import { boundary } from "@shopify/shopify-app-react-router/server";
 import { authenticate } from "../shopify.server";
+import db from "../db.server";
+import {
+  createCommercialWithCodes,
+  issueArcadeDiscount,
+  recordAudit,
+} from "../lib/lff.server";
 
 export const loader = async ({ request }) => {
-  await authenticate.admin(request);
+  const { session } = await authenticate.admin(request);
+  const shop = session.shop;
 
-  return null;
-};
-
-export const action = async ({ request }) => {
-  const { admin } = await authenticate.admin(request);
-  const color = ["Red", "Orange", "Yellow", "Green"][
-    Math.floor(Math.random() * 4)
-  ];
-  const response = await admin.graphql(
-    `#graphql
-      mutation populateProduct($product: ProductCreateInput!) {
-        productCreate(product: $product) {
-          product {
-            id
-            title
-            handle
-            status
-            variants(first: 10) {
-              edges {
-                node {
-                  id
-                  price
-                  barcode
-                  createdAt
-                }
-              }
-            }
-            demoInfo: metafield(namespace: "$app", key: "demo_info") {
-              jsonValue
-            }
-          }
-        }
-      }`,
-    {
-      variables: {
-        product: {
-          title: `${color} Snowboard`,
-          metafields: [
-            {
-              namespace: "$app",
-              key: "demo_info",
-              value: "Created by React Router Template",
-            },
-          ],
-        },
-      },
-    },
-  );
-  const responseJson = await response.json();
-  const product = responseJson.data.productCreate.product;
-  const variantId = product.variants.edges[0].node.id;
-  const variantResponse = await admin.graphql(
-    `#graphql
-    mutation shopifyReactRouterTemplateUpdateVariant($productId: ID!, $variants: [ProductVariantsBulkInput!]!) {
-      productVariantsBulkUpdate(productId: $productId, variants: $variants) {
-        productVariants {
-          id
-          price
-          barcode
-          createdAt
-        }
-      }
-    }`,
-    {
-      variables: {
-        productId: product.id,
-        variants: [{ id: variantId, price: "100.00" }],
-      },
-    },
-  );
-  const variantResponseJson = await variantResponse.json();
-  const metaobjectResponse = await admin.graphql(
-    `#graphql
-    mutation shopifyReactRouterTemplateUpsertMetaobject($handle: MetaobjectHandleInput!, $values: JSON!) {
-      metaobjectUpsert(handle: $handle, values: $values) {
-        metaobject {
-          id
-          handle
-          values
-        }
-        userErrors {
-          field
-          message
-        }
-      }
-    }`,
-    {
-      variables: {
-        handle: {
-          type: "$app:example",
-          handle: "demo-entry",
-        },
-        values: {
-          title: "Demo Entry",
-          description:
-            "This metaobject was created by the Shopify app template to demonstrate the metaobject API.",
-        },
-      },
-    },
-  );
-  const metaobjectResponseJson = await metaobjectResponse.json();
+  const [
+    commercialCount,
+    b2bPendingCount,
+    openChatCount,
+    arcadeIssuedCount,
+    discountCount,
+    latestCommercials,
+    latestB2B,
+    latestDiscounts,
+  ] = await Promise.all([
+    db.commercialUser.count({ where: { shop } }),
+    db.b2BCompany.count({ where: { shop, status: "pending" } }),
+    db.chatThread.count({ where: { shop, status: "open" } }),
+    db.arcadeRedemption.count({ where: { shop } }),
+    db.discountIssuance.count({ where: { shop } }),
+    db.commercialUser.findMany({
+      where: { shop },
+      orderBy: { createdAt: "desc" },
+      take: 5,
+    }),
+    db.b2BCompany.findMany({
+      where: { shop },
+      orderBy: { createdAt: "desc" },
+      take: 5,
+    }),
+    db.discountIssuance.findMany({
+      where: { shop },
+      orderBy: { createdAt: "desc" },
+      take: 8,
+    }),
+  ]);
 
   return {
-    product: responseJson.data.productCreate.product,
-    variant: variantResponseJson.data.productVariantsBulkUpdate.productVariants,
-    metaobject: metaobjectResponseJson.data.metaobjectUpsert.metaobject,
+    shop,
+    counters: {
+      commercialCount,
+      b2bPendingCount,
+      openChatCount,
+      arcadeIssuedCount,
+      discountCount,
+    },
+    latestCommercials,
+    latestB2B,
+    latestDiscounts,
   };
 };
 
-export default function Index() {
-  const fetcher = useFetcher();
-  const shopify = useAppBridge();
-  const isLoading =
-    ["loading", "submitting"].includes(fetcher.state) &&
-    fetcher.formMethod === "POST";
+export const action = async ({ request }) => {
+  const { admin, session } = await authenticate.admin(request);
+  const shop = session.shop;
+  const formData = await request.formData();
+  const intent = formData.get("intent");
 
-  useEffect(() => {
-    if (fetcher.data?.product?.id) {
-      shopify.toast.show("Product created");
+  try {
+    if (intent === "create-commercial") {
+      const name = String(formData.get("name") || "").trim();
+      const email = String(formData.get("email") || "").trim();
+
+      if (!name) {
+        throw new Error("Pon un nombre para el comercial.");
+      }
+
+      const commercial = await createCommercialWithCodes({
+        admin,
+        shop,
+        name,
+        email: email || null,
+      });
+
+      return {
+        ok: true,
+        message: `Comercial creado: ${commercial.captureCode} y ${commercial.personalCode}`,
+      };
     }
-  }, [fetcher.data?.product?.id, shopify]);
-  const generateProduct = () => fetcher.submit({}, { method: "POST" });
+
+    if (intent === "create-b2b") {
+      const companyName = String(formData.get("companyName") || "").trim();
+      const contactEmail = String(formData.get("contactEmail") || "").trim();
+      const referredByCode = String(formData.get("referredByCode") || "").trim();
+
+      if (!companyName) {
+        throw new Error("Pon el nombre de la tienda.");
+      }
+
+      const b2b = await db.b2BCompany.create({
+        data: {
+          shop,
+          companyName,
+          contactEmail: contactEmail || null,
+          referredByCode: referredByCode || null,
+          priceTier: referredByCode ? "referred_55_first_63" : "direct_60",
+        },
+      });
+
+      await recordAudit(shop, "b2b.created", {
+        targetType: "b2b_company",
+        targetId: b2b.id,
+        referredByCode,
+      });
+
+      return { ok: true, message: `Tienda B2B registrada: ${companyName}` };
+    }
+
+    if (intent === "issue-arcade") {
+      const email = String(formData.get("email") || "").trim();
+      const keysSpent = Number(formData.get("keysSpent") || 0);
+
+      const redemption = await issueArcadeDiscount({
+        admin,
+        shop,
+        email: email || null,
+        keysSpent,
+      });
+
+      return {
+        ok: true,
+        message: `Codigo Arcade creado: ${redemption.code} (${redemption.discountPercent}%)`,
+      };
+    }
+
+    throw new Error("Accion no reconocida.");
+  } catch (error) {
+    return { ok: false, message: error.message };
+  }
+};
+
+function Field({ label, name, type = "text", required = false, placeholder }) {
+  return (
+    <label style={{ display: "block", marginBottom: 12 }}>
+      <span style={{ display: "block", fontWeight: 650, marginBottom: 6 }}>
+        {label}
+      </span>
+      <input
+        name={name}
+        type={type}
+        required={required}
+        placeholder={placeholder}
+        style={{
+          width: "100%",
+          border: "1px solid #c9cccf",
+          borderRadius: 6,
+          padding: "9px 11px",
+          fontSize: 14,
+        }}
+      />
+    </label>
+  );
+}
+
+function Stat({ label, value }) {
+  return (
+    <div
+      style={{
+        border: "1px solid #dfe3e8",
+        borderRadius: 8,
+        padding: 14,
+        minWidth: 150,
+      }}
+    >
+      <div style={{ fontSize: 13, color: "#616a75" }}>{label}</div>
+      <div style={{ fontSize: 24, fontWeight: 750 }}>{value}</div>
+    </div>
+  );
+}
+
+function SimpleTable({ rows, columns, empty }) {
+  if (!rows.length) {
+    return <s-paragraph>{empty}</s-paragraph>;
+  }
 
   return (
-    <s-page heading="Shopify app template">
-      <s-button slot="primary-action" onClick={generateProduct}>
-        Generate a product
-      </s-button>
+    <div style={{ overflowX: "auto" }}>
+      <table style={{ width: "100%", borderCollapse: "collapse" }}>
+        <thead>
+          <tr>
+            {columns.map((column) => (
+              <th
+                key={column.key}
+                style={{
+                  textAlign: "left",
+                  borderBottom: "1px solid #dfe3e8",
+                  padding: "8px 6px",
+                  fontSize: 13,
+                }}
+              >
+                {column.label}
+              </th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((row) => (
+            <tr key={row.id}>
+              {columns.map((column) => (
+                <td
+                  key={column.key}
+                  style={{
+                    borderBottom: "1px solid #edf0f2",
+                    padding: "8px 6px",
+                    fontSize: 13,
+                  }}
+                >
+                  {column.render ? column.render(row) : row[column.key] || "-"}
+                </td>
+              ))}
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
 
-      <s-section heading="Congrats on creating a new Shopify app 🎉">
+export default function Index() {
+  const data = useLoaderData();
+  const actionData = useActionData();
+  const navigation = useNavigation();
+  const busy = navigation.state !== "idle";
+
+  return (
+    <s-page heading="Control Center LFF">
+      <s-section heading="Estado real">
         <s-paragraph>
-          This embedded app template uses{" "}
-          <s-link
-            href="https://shopify.dev/docs/apps/tools/app-bridge"
-            target="_blank"
-          >
-            App Bridge
-          </s-link>{" "}
-          interface examples like an{" "}
-          <s-link href="/app/additional">additional page in the app nav</s-link>
-          , as well as an{" "}
-          <s-link
-            href="https://shopify.dev/docs/api/admin-graphql"
-            target="_blank"
-          >
-            Admin GraphQL
-          </s-link>{" "}
-          mutation demo, to provide a starting point for app development.
+          Backend conectado a {data.shop}. Desde aqui se crean codigos reales de
+          Shopify y se registran atribuciones, tiendas, chats, canjes y auditoria
+          en servidor.
         </s-paragraph>
-      </s-section>
-      <s-section heading="Get started with products">
-        <s-paragraph>
-          Generate a product with GraphQL and get the JSON output for that
-          product. Learn more about the{" "}
-          <s-link
-            href="https://shopify.dev/docs/api/admin-graphql/latest/mutations/productCreate"
-            target="_blank"
+        {actionData?.message && (
+          <div
+            style={{
+              margin: "12px 0",
+              border: `1px solid ${actionData.ok ? "#95c9a7" : "#e0a0a0"}`,
+              background: actionData.ok ? "#f0fff4" : "#fff5f5",
+              borderRadius: 8,
+              padding: 12,
+            }}
           >
-            productCreate
-          </s-link>{" "}
-          mutation in our API references. Includes a product{" "}
-          <s-link
-            href="https://shopify.dev/docs/apps/build/custom-data/metafields"
-            target="_blank"
-          >
-            metafield
-          </s-link>{" "}
-          and{" "}
-          <s-link
-            href="https://shopify.dev/docs/apps/build/custom-data/metaobjects"
-            target="_blank"
-          >
-            metaobject
-          </s-link>
-          .
-        </s-paragraph>
-        <s-stack direction="inline" gap="base">
-          <s-button
-            onClick={generateProduct}
-            {...(isLoading ? { loading: true } : {})}
-          >
-            Generate a product
-          </s-button>
-          {fetcher.data?.product && (
-            <s-button
-              onClick={() => {
-                shopify.intents.invoke?.("edit:shopify/Product", {
-                  value: fetcher.data?.product?.id,
-                });
-              }}
-              target="_blank"
-              variant="tertiary"
-            >
-              Edit product
-            </s-button>
-          )}
-        </s-stack>
-        {fetcher.data?.product && (
-          <s-section heading="productCreate mutation">
-            <s-stack direction="block" gap="base">
-              <s-box
-                padding="base"
-                borderWidth="base"
-                borderRadius="base"
-                background="subdued"
-              >
-                <pre
-                  style={{
-                    margin: 0,
-                    whiteSpace: "pre-wrap",
-                    wordBreak: "break-word",
-                  }}
-                >
-                  <code>{JSON.stringify(fetcher.data.product, null, 2)}</code>
-                </pre>
-              </s-box>
-
-              <s-heading>productVariantsBulkUpdate mutation</s-heading>
-              <s-box
-                padding="base"
-                borderWidth="base"
-                borderRadius="base"
-                background="subdued"
-              >
-                <pre
-                  style={{
-                    margin: 0,
-                    whiteSpace: "pre-wrap",
-                    wordBreak: "break-word",
-                  }}
-                >
-                  <code>{JSON.stringify(fetcher.data.variant, null, 2)}</code>
-                </pre>
-              </s-box>
-
-              <s-heading>metaobjectUpsert mutation</s-heading>
-              <s-box
-                padding="base"
-                borderWidth="base"
-                borderRadius="base"
-                background="subdued"
-              >
-                <pre
-                  style={{
-                    margin: 0,
-                    whiteSpace: "pre-wrap",
-                    wordBreak: "break-word",
-                  }}
-                >
-                  <code>
-                    {JSON.stringify(fetcher.data.metaobject, null, 2)}
-                  </code>
-                </pre>
-              </s-box>
-            </s-stack>
-          </s-section>
+            {actionData.message}
+          </div>
         )}
+        <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
+          <Stat label="Comerciales" value={data.counters.commercialCount} />
+          <Stat label="Tiendas pendientes" value={data.counters.b2bPendingCount} />
+          <Stat label="Chats abiertos" value={data.counters.openChatCount} />
+          <Stat label="Canjes Arcade" value={data.counters.arcadeIssuedCount} />
+          <Stat label="Codigos emitidos" value={data.counters.discountCount} />
+        </div>
       </s-section>
 
-      <s-section slot="aside" heading="App template specs">
+      <s-section heading="Crear comercial">
         <s-paragraph>
-          <s-text>Framework: </s-text>
-          <s-link href="https://reactrouter.com/" target="_blank">
-            React Router
-          </s-link>
+          Genera codigo de captacion 15% para nuevo cliente y codigo propio 40%.
+          Ambos quedan vinculados al comercial.
         </s-paragraph>
-        <s-paragraph>
-          <s-text>Interface: </s-text>
-          <s-link
-            href="https://shopify.dev/docs/api/app-home/using-polaris-components"
-            target="_blank"
-          >
-            Polaris web components
-          </s-link>
-        </s-paragraph>
-        <s-paragraph>
-          <s-text>API: </s-text>
-          <s-link
-            href="https://shopify.dev/docs/api/admin-graphql"
-            target="_blank"
-          >
-            GraphQL
-          </s-link>
-        </s-paragraph>
-        <s-paragraph>
-          <s-text>Custom data: </s-text>
-          <s-link
-            href="https://shopify.dev/docs/apps/build/custom-data"
-            target="_blank"
-          >
-            Metafields &amp; metaobjects
-          </s-link>
-        </s-paragraph>
-        <s-paragraph>
-          <s-text>Database: </s-text>
-          <s-link href="https://www.prisma.io/" target="_blank">
-            Prisma
-          </s-link>
-        </s-paragraph>
+        <Form method="post">
+          <input type="hidden" name="intent" value="create-commercial" />
+          <Field label="Nombre" name="name" required placeholder="Nombre comercial" />
+          <Field label="Email" name="email" type="email" placeholder="email@ejemplo.com" />
+          <button type="submit" disabled={busy}>
+            Crear comercial y codigos
+          </button>
+        </Form>
       </s-section>
 
-      <s-section slot="aside" heading="Next steps">
-        <s-unordered-list>
-          <s-list-item>
-            Build an{" "}
-            <s-link
-              href="https://shopify.dev/docs/apps/getting-started/build-app-example"
-              target="_blank"
-            >
-              example app
-            </s-link>
-          </s-list-item>
-          <s-list-item>
-            Explore Shopify&apos;s API with{" "}
-            <s-link
-              href="https://shopify.dev/docs/apps/tools/graphiql-admin-api"
-              target="_blank"
-            >
-              GraphiQL
-            </s-link>
-          </s-list-item>
-        </s-unordered-list>
+      <s-section heading="Registrar tienda">
+        <s-paragraph>
+          Registra una tienda B2B. Si trae codigo comercial, queda marcada como
+          referida para aplicar las reglas aprobadas.
+        </s-paragraph>
+        <Form method="post">
+          <input type="hidden" name="intent" value="create-b2b" />
+          <Field label="Nombre tienda" name="companyName" required placeholder="Tienda Friki SL" />
+          <Field label="Email contacto" name="contactEmail" type="email" placeholder="compras@tienda.es" />
+          <Field label="Codigo comercial referido" name="referredByCode" placeholder="LFF15-..." />
+          <button type="submit" disabled={busy}>
+            Registrar tienda
+          </button>
+        </Form>
+      </s-section>
+
+      <s-section heading="Emitir codigo Arcade">
+        <s-paragraph>
+          Emite un codigo de un solo uso segun llaves canjeadas. El canje real
+          del storefront se conectara a este mismo servicio.
+        </s-paragraph>
+        <Form method="post">
+          <input type="hidden" name="intent" value="issue-arcade" />
+          <Field label="Email jugador" name="email" type="email" placeholder="cliente@email.com" />
+          <Field label="Llaves gastadas (1-6)" name="keysSpent" type="number" required placeholder="3" />
+          <button type="submit" disabled={busy}>
+            Crear codigo Arcade
+          </button>
+        </Form>
+      </s-section>
+
+      <s-section heading="Ultimos comerciales">
+        <SimpleTable
+          rows={data.latestCommercials}
+          empty="Aun no hay comerciales."
+          columns={[
+            { key: "name", label: "Nombre" },
+            { key: "email", label: "Email" },
+            { key: "captureCode", label: "Captacion 15%" },
+            { key: "personalCode", label: "Propio 40%" },
+            { key: "status", label: "Estado" },
+          ]}
+        />
+      </s-section>
+
+      <s-section heading="Ultimas tiendas">
+        <SimpleTable
+          rows={data.latestB2B}
+          empty="Aun no hay tiendas registradas."
+          columns={[
+            { key: "companyName", label: "Tienda" },
+            { key: "contactEmail", label: "Email" },
+            { key: "priceTier", label: "Nivel" },
+            { key: "status", label: "Estado" },
+          ]}
+        />
+      </s-section>
+
+      <s-section heading="Ultimos codigos">
+        <SimpleTable
+          rows={data.latestDiscounts}
+          empty="Aun no hay codigos emitidos."
+          columns={[
+            { key: "code", label: "Codigo" },
+            { key: "kind", label: "Tipo" },
+            { key: "percent", label: "%" },
+            { key: "status", label: "Estado" },
+          ]}
+        />
       </s-section>
     </s-page>
   );
+}
+
+export function ErrorBoundary() {
+  return boundary.error(useRouteError());
 }
 
 export const headers = (headersArgs) => {

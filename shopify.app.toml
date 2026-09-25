@@ -1,31 +1,24 @@
 # This file stores configurations for your Shopify app.
-client_id = ""
+client_id = "62b68f5e3b3a348d914e98db544f3bdd"
+name = "OpenClaw Backend LFF"
+application_url = "https://lff-shopify-backend.adept-sugar-9802.chatgpt.site"
+embedded = true
+
+[auth]
+redirect_urls = [
+  "https://lff-shopify-backend.adept-sugar-9802.chatgpt.site/auth/callback",
+  "https://lff-shopify-backend.adept-sugar-9802.chatgpt.site/auth/shopify/callback",
+  "https://lff-shopify-backend.adept-sugar-9802.chatgpt.site/api/auth/callback"
+]
 
 [access_scopes]
 # Learn more at https://shopify.dev/docs/apps/tools/cli/configuration#access_scopes
-scopes = "write_products,write_metaobjects,write_metaobject_definitions"
+scopes = "read_customers,write_customers,read_price_rules,write_price_rules,read_discounts,write_discounts,read_draft_orders,write_draft_orders,read_inventory,read_metaobjects,write_metaobjects,read_orders,write_orders,read_products,write_app_proxy"
 
-# Product metafield for tracking demo products created by this template
-[product.metafields.app.demo_info]
-type = "single_line_text_field"
-name = "Demo Source Info"
-description = "Tracks products created by the Shopify app template for development"
-access.admin = "merchant_read_write"
-
-# Example metaobject definition
-[metaobjects.app.example]
-name = "Example"
-description = "An example metaobject definition created by this template"
-access.admin = "merchant_read_write"
-
-[metaobjects.app.example.fields.title]
-name = "Title"
-type = "single_line_text_field"
-required = true
-
-[metaobjects.app.example.fields.description]
-name = "Description"
-type = "multi_line_text_field"
+[app_proxy]
+url = "/apps/lff"
+prefix = "apps"
+subpath = "lff"
 
 [webhooks]
 api_version = "2026-07"
@@ -39,6 +32,22 @@ api_version = "2026-07"
   [[webhooks.subscriptions]]
   topics = [ "app/scopes_update" ]
   uri = "/webhooks/app/scopes_update"
+
+  [[webhooks.subscriptions]]
+  topics = [ "orders/paid" ]
+  uri = "/webhooks/orders/paid"
+
+  [[webhooks.subscriptions]]
+  topics = [ "orders/cancelled" ]
+  uri = "/webhooks/orders/cancelled"
+
+  [[webhooks.subscriptions]]
+  topics = [ "refunds/create" ]
+  uri = "/webhooks/refunds/create"
+
+  [[webhooks.subscriptions]]
+  topics = [ "customers/create" ]
+  uri = "/webhooks/customers/create"
 
   # Webhooks can have filters
   # Only receive webhooks for product updates with a product price >= 10.00

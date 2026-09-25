@@ -14,21 +14,188 @@ datasource db {
 }
 
 model Session {
-  id            String    @id
-  shop          String
-  state         String
-  isOnline      Boolean   @default(false)
-  scope         String?
-  expires       DateTime?
-  accessToken   String
-  userId        BigInt?
-  firstName     String?
-  lastName      String?
-  email         String?
-  accountOwner  Boolean   @default(false)
-  locale        String?
-  collaborator  Boolean?  @default(false)
-  emailVerified Boolean?  @default(false)
+  id                  String    @id
+  shop                String
+  state               String
+  isOnline            Boolean   @default(false)
+  scope               String?
+  expires             DateTime?
+  accessToken         String
+  userId              BigInt?
+  firstName           String?
+  lastName            String?
+  email               String?
+  accountOwner        Boolean   @default(false)
+  locale              String?
+  collaborator        Boolean?  @default(false)
+  emailVerified       Boolean?  @default(false)
   refreshToken        String?
   refreshTokenExpires DateTime?
+}
+
+model CommercialUser {
+  id                        String   @id @default(cuid())
+  shop                      String
+  name                      String
+  email                     String?
+  captureCode               String   @unique
+  personalCode              String   @unique
+  status                    String   @default("active")
+  shopifyCaptureDiscountId  String?
+  shopifyPersonalDiscountId String?
+  createdAt                 DateTime @default(now())
+  updatedAt                 DateTime @updatedAt
+
+  attributions CommercialCustomerAttribution[]
+  commissions  Commission[]
+}
+
+model CommercialCustomerAttribution {
+  id            String    @id @default(cuid())
+  shop          String
+  commercialId  String
+  customerGid   String?
+  customerEmail String?
+  orderGid      String?
+  sourceCode    String
+  status        String    @default("active")
+  firstOrderAt  DateTime?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  commercial CommercialUser @relation(fields: [commercialId], references: [id])
+
+  @@unique([shop, customerGid])
+  @@index([shop, customerEmail])
+}
+
+model Commission {
+  id             String    @id @default(cuid())
+  shop           String
+  commercialId   String
+  orderGid       String
+  orderName      String?
+  basisCents     Int
+  rateBps        Int
+  amountCents    Int
+  status         String    @default("pending_validation")
+  validationDate DateTime?
+  payoutId       String?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  commercial CommercialUser @relation(fields: [commercialId], references: [id])
+  payout     Payout?        @relation(fields: [payoutId], references: [id])
+
+  @@unique([shop, orderGid, commercialId])
+}
+
+model Payout {
+  id         String    @id @default(cuid())
+  shop       String
+  label      String
+  status     String    @default("draft")
+  totalCents Int       @default(0)
+  createdAt  DateTime  @default(now())
+  paidAt     DateTime?
+
+  commissions Commission[]
+}
+
+model B2BCompany {
+  id             String   @id @default(cuid())
+  shop           String
+  companyName    String
+  contactEmail   String?
+  status         String   @default("pending")
+  referredByCode String?
+  commercialId   String?
+  priceTier      String   @default("direct_60")
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  @@index([shop, referredByCode])
+}
+
+model ChatThread {
+  id        String   @id @default(cuid())
+  shop      String
+  subject   String
+  channel   String
+  ownerType String
+  ownerId   String?
+  status    String   @default("open")
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  messages ChatMessage[]
+}
+
+model ChatMessage {
+  id        String   @id @default(cuid())
+  threadId  String
+  author    String
+  body      String
+  createdAt DateTime @default(now())
+
+  thread ChatThread @relation(fields: [threadId], references: [id])
+}
+
+model ArcadeRedemption {
+  id                String    @id @default(cuid())
+  shop              String
+  customerGid       String?
+  email             String?
+  keysSpent         Int
+  discountPercent   Int
+  code              String    @unique
+  shopifyDiscountId String?
+  status            String    @default("issued")
+  createdAt         DateTime  @default(now())
+  redeemedAt        DateTime?
+}
+
+model DiscountIssuance {
+  id                String   @id @default(cuid())
+  shop              String
+  code              String   @unique
+  kind              String
+  ownerType         String?
+  ownerId           String?
+  percent           Int
+  usageLimit        Int?
+  combinesWithJson  String?
+  shopifyDiscountId String?
+  status            String   @default("created")
+  createdAt         DateTime @default(now())
+}
+
+model ProcessedWebhook {
+  id          String   @id
+  shop        String
+  topic       String
+  payloadJson String?
+  createdAt   DateTime @default(now())
+}
+
+model AuditLog {
+  id          String   @id @default(cuid())
+  shop        String
+  actor       String?
+  action      String
+  targetType  String?
+  targetId    String?
+  detailsJson String?
+  createdAt   DateTime @default(now())
+}
+
+model ContactRequest {
+  id        String   @id @default(cuid())
+  shop      String
+  email     String?
+  name      String?
+  subject   String?
+  message   String
+  status    String   @default("new")
+  createdAt DateTime @default(now())
 }
