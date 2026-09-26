@@ -59,30 +59,37 @@ async function createOpenAIReply(message) {
   const apiKey = process.env.OPENAI_API_KEY;
   if (!apiKey) return null;
 
-  const model = process.env.LFF_ASSISTANT_MODEL || "gpt-5.6-luna";
-  const response = await fetch("https://api.openai.com/v1/responses", {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${apiKey}`,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({
-      model,
-      store: false,
-      max_output_tokens: 500,
-      instructions:
-        "Eres el asistente de La Fabrica Friki, una tienda Shopify de productos frikis, anime, gaming, Disney y multiverso. Responde en espanol de Espana, breve, claro y util. No inventes stock, pedidos, precios ni politicas que no conozcas. Si una accion requiere datos privados, pedido concreto o una persona, deriva a WhatsApp +34 614 002 652. Nunca pidas claves, contrasenas ni datos de tarjeta.",
-      input: message,
-    }),
-  });
+  const configuredModel = process.env.LFF_ASSISTANT_MODEL || "gpt-5-mini";
+  const models = [...new Set([configuredModel, "gpt-5-mini"])];
+  let lastError = null;
 
-  if (!response.ok) {
+  for (const model of models) {
+    const response = await fetch("https://api.openai.com/v1/responses", {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        model,
+        store: false,
+        max_output_tokens: 500,
+        instructions:
+          "Eres el asistente de La Fabrica Friki, una tienda Shopify de productos frikis, anime, gaming, Disney y multiverso. Responde en espanol de Espana, breve, claro y util. No inventes stock, pedidos, precios ni politicas que no conozcas. Si una accion requiere datos privados, pedido concreto o una persona, deriva a WhatsApp +34 614 002 652. Nunca pidas claves, contrasenas ni datos de tarjeta.",
+        input: message,
+      }),
+    });
+
+    if (response.ok) {
+      const data = await response.json();
+      return outputTextFromResponse(data);
+    }
+
     const detail = await response.text().catch(() => "");
-    throw new Error(`OpenAI ${response.status}: ${detail.slice(0, 300)}`);
+    lastError = new Error(`OpenAI ${response.status}: ${detail.slice(0, 300)}`);
   }
 
-  const data = await response.json();
-  return outputTextFromResponse(data);
+  throw lastError;
 }
 
 export async function answerStoreAssistant({ shop, message, customerId = null }) {
