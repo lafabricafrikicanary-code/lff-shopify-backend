@@ -38,6 +38,12 @@ export const action = async ({ request }) => {
       customerId,
     });
   } catch (error) {
+    console.error("LFF_ARCADE_REDEEM_ERROR", {
+      shop,
+      keysSpent: body.keysSpent,
+      message: error.message,
+    });
+
     return Response.json(
       {
         ok: false,
