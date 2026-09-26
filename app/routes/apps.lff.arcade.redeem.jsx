@@ -11,7 +11,21 @@ async function bodyData(request) {
 }
 
 export const action = async ({ request }) => {
-  await authenticate.public.appProxy(request);
+  try {
+    await authenticate.public.appProxy(request);
+  } catch (error) {
+    console.error("LFF_ARCADE_PROXY_AUTH_ERROR", {
+      message: error.message,
+    });
+
+    return Response.json(
+      {
+        ok: false,
+        error: `App Proxy no autorizado: ${error.message || "firma ausente"}`,
+      },
+      { status: 401 },
+    );
+  }
 
   const url = new URL(request.url);
   const shop = url.searchParams.get("shop");
