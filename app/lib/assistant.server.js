@@ -92,6 +92,16 @@ async function createOpenAIReply(message) {
   throw lastError;
 }
 
+function classifyOpenAIError(error) {
+  const message = String(error?.message || "").toLowerCase();
+  if (message.includes("model") && message.includes("not")) return "model_not_found";
+  if (message.includes("does not exist")) return "model_not_found";
+  if (message.includes("invalid_api_key") || message.includes("incorrect api key")) return "invalid_api_key";
+  if (message.includes("insufficient_quota") || message.includes("billing")) return "insufficient_quota";
+  if (message.includes("permission") || message.includes("not have access")) return "model_no_access";
+  return "api_error";
+}
+
 export async function answerStoreAssistant({ shop, message, customerId = null }) {
   const text = String(message || "").trim().slice(0, 1200);
   if (!text) {
@@ -140,6 +150,7 @@ export async function answerStoreAssistant({ shop, message, customerId = null })
       threadId: thread?.id,
     };
   } catch (error) {
+    const errorCode = classifyOpenAIError(error);
     const reply =
       "Ahora mismo el asistente IA no puede conectar con el modelo, pero puedo darte ayuda basica: productos, pedidos, Club, comerciales, tiendas o WhatsApp.";
 
@@ -148,7 +159,7 @@ export async function answerStoreAssistant({ shop, message, customerId = null })
         data: {
           threadId: thread.id,
           author: "assistant_error",
-          body: `${reply} (${error.message})`,
+          body: `${reply} (${errorCode}: ${error.message})`,
         },
       });
     }
@@ -156,6 +167,7 @@ export async function answerStoreAssistant({ shop, message, customerId = null })
     return {
       reply,
       mode: "error_fallback",
+      errorCode,
       threadId: thread?.id,
     };
   }

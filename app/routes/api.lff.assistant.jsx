@@ -51,6 +51,7 @@ export const action = async ({ request }) => {
       ok: true,
       reply: result.reply,
       mode: result.mode,
+      errorCode: result.errorCode,
       threadId: result.threadId,
     },
     { headers: corsHeaders },
