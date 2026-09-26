@@ -1,5 +1,10 @@
-import { authenticate, unauthenticated } from "../shopify.server";
-import { issueArcadeDiscount } from "../lib/lff.server";
+import { issueArcadePooledDiscount } from "../lib/lff.server";
+
+const corsHeaders = {
+  "Access-Control-Allow-Headers": "Content-Type, Accept",
+  "Access-Control-Allow-Methods": "POST, OPTIONS",
+  "Access-Control-Allow-Origin": "*",
+};
 
 async function bodyData(request) {
   const contentType = request.headers.get("content-type") || "";
@@ -11,24 +16,15 @@ async function bodyData(request) {
 }
 
 export const action = async ({ request }) => {
-  try {
-    await authenticate.public.appProxy(request);
-  } catch (error) {
-    console.error("LFF_ARCADE_PROXY_AUTH_ERROR", {
-      message: error.message,
-    });
-
-    return Response.json(
-      {
-        ok: false,
-        error: `App Proxy no autorizado: ${error.message || "firma ausente"}`,
-      },
-      { status: 401 },
-    );
+  if (request.method === "OPTIONS") {
+    return new Response(null, { headers: corsHeaders });
   }
 
   const url = new URL(request.url);
-  const shop = url.searchParams.get("shop");
+  const shop =
+    url.searchParams.get("shop") ||
+    process.env.SHOPIFY_SHOP_DOMAIN ||
+    "lafabricafriki.myshopify.com";
   const customerId = url.searchParams.get("logged_in_customer_id");
   const body = await bodyData(request);
 
@@ -37,20 +33,22 @@ export const action = async ({ request }) => {
   }
 
   try {
-    const { admin } = await unauthenticated.admin(shop);
-    const redemption = await issueArcadeDiscount({
-      admin,
+    const redemption = await issueArcadePooledDiscount({
       shop,
       email: body.email || null,
       keysSpent: body.keysSpent,
-    });
-
-    return Response.json({
-      ok: true,
-      code: redemption.code,
-      percent: redemption.discountPercent,
       customerId,
     });
+
+    return Response.json(
+      {
+        ok: true,
+        code: redemption.code,
+        percent: redemption.discountPercent,
+        customerId,
+      },
+      { headers: corsHeaders },
+    );
   } catch (error) {
     console.error("LFF_ARCADE_REDEEM_ERROR", {
       shop,
@@ -63,7 +61,7 @@ export const action = async ({ request }) => {
         ok: false,
         error: error.message || "No se pudo crear el codigo Arcade.",
       },
-      { status: 400 },
+      { status: 400, headers: corsHeaders },
     );
   }
 };

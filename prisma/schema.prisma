@@ -155,6 +155,22 @@ model ArcadeRedemption {
   redeemedAt        DateTime?
 }
 
+model ArcadeDiscountCode {
+  id                 String    @id @default(cuid())
+  shop               String
+  code               String    @unique
+  discountPercent    Int
+  status             String    @default("available")
+  source             String    @default("precreated")
+  assignedToEmail    String?
+  assignedCustomerId String?
+  assignedAt         DateTime?
+  createdAt          DateTime  @default(now())
+  updatedAt          DateTime  @updatedAt
+
+  @@index([shop, discountPercent, status])
+}
+
 model DiscountIssuance {
   id                String   @id @default(cuid())
   shop              String

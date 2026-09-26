@@ -265,3 +265,80 @@ export async function issueArcadeDiscount({ admin, shop, email, keysSpent }) {
 
   return redemption;
 }
+
+export async function issueArcadePooledDiscount({
+  shop,
+  email,
+  keysSpent,
+  customerId = null,
+}) {
+  const percentByKeys = { 1: 5, 2: 10, 3: 15, 4: 20, 5: 25, 6: 30 };
+  const discountPercent = percentByKeys[Number(keysSpent)] || 0;
+
+  if (!discountPercent) {
+    throw new Error("Llaves Arcade invalidas. Usa de 1 a 6.");
+  }
+
+  const availableCode = await db.arcadeDiscountCode.findFirst({
+    where: {
+      shop,
+      discountPercent,
+      status: "available",
+    },
+    orderBy: { createdAt: "asc" },
+  });
+
+  if (!availableCode) {
+    throw new Error(
+      `Codigos Arcade ${discountPercent}% agotados temporalmente.`,
+    );
+  }
+
+  const updatedCode = await db.arcadeDiscountCode.update({
+    where: { id: availableCode.id },
+    data: {
+      status: "assigned",
+      assignedToEmail: email || null,
+      assignedCustomerId: customerId || null,
+      assignedAt: new Date(),
+    },
+  });
+
+  const redemption = await db.arcadeRedemption.create({
+    data: {
+      shop,
+      customerGid: customerId,
+      email,
+      keysSpent: Number(keysSpent),
+      discountPercent,
+      code: updatedCode.code,
+      status: "issued",
+    },
+  });
+
+  await db.discountIssuance.create({
+    data: {
+      shop,
+      code: updatedCode.code,
+      kind: "arcade_pool",
+      ownerType: "arcade_player",
+      ownerId: redemption.id,
+      percent: discountPercent,
+      usageLimit: 1,
+      combinesWithJson: JSON.stringify({
+        arcade: false,
+        commercialCapture15: true,
+        commercialPersonal40: false,
+      }),
+    },
+  });
+
+  await recordAudit(shop, "arcade.pool_code_assigned", {
+    targetType: "arcade_redemption",
+    targetId: redemption.id,
+    code: updatedCode.code,
+    discountPercent,
+  });
+
+  return redemption;
+}
