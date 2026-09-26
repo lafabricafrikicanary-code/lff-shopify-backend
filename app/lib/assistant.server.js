@@ -2,6 +2,36 @@ import db from "../db.server";
 
 const FALLBACK_REPLIES = [
   {
+    pattern: /hola|buenas|buenos|hey|saludos/i,
+    reply:
+      "Hola, soy el Asistente Friki. Puedo ayudarte a encontrar productos por universo, preparar un regalo, explicarte el Club, la Caja Friki, descuentos, comerciales, tiendas o contacto.",
+  },
+  {
+    pattern: /anime|manga|naruto|one piece|dragon ball|kimetsu|demon slayer|jujutsu|pokemon|pok[eé]mon|goku|luffy/i,
+    reply:
+      "Para anime y manga, empieza por la seccion Anime & Manga. Si buscas un personaje concreto, dime el nombre o la serie y te oriento por colecciones, figuras, regalos o productos frikis relacionados.",
+  },
+  {
+    pattern: /gaming|juego|videojuego|playstation|nintendo|xbox|minecraft|zelda|mario|fortnite|sonic/i,
+    reply:
+      "Para gaming, ve a la seccion Gaming. Si es para regalo, dime edad aproximada, consola/juego favorito y presupuesto, y te digo que tipo de producto buscar primero.",
+  },
+  {
+    pattern: /disney|marvel|star wars|pixar|stitch|mickey|spiderman|deadpool|vengadores/i,
+    reply:
+      "Para Disney, Marvel, Star Wars y Pixar, entra en la seccion Disney. Si quieres un regalo, dime personaje o pelicula favorita y te ayudo a elegir una categoria.",
+  },
+  {
+    pattern: /rick|morty|multiverso|harry potter|dc|batman|superman|se[ñn]or de los anillos|friki/i,
+    reply:
+      "La seccion Multiverso es para fandoms variados: Rick y Morty, superheroes, fantasia, cine, series y cultura friki. Dime el universo que buscas y te guio.",
+  },
+  {
+    pattern: /regalo|cumple|cumplea[ñn]os|navidad|reyes|pareja|ni[ñn]o|ni[ñn]a|sobrino|amigo|amiga|presupuesto/i,
+    reply:
+      "Te ayudo con regalos. Dime tres cosas: fandom favorito, edad aproximada y presupuesto. Con eso te puedo orientar entre anime, gaming, Disney, multiverso, Caja Friki o productos sorpresa.",
+  },
+  {
     pattern: /whats|tel[eé]fono|contact|persona|humano/i,
     reply:
       "Puedes hablar directamente con Alejandro por WhatsApp en el +34 614 002 652. Si quieres, te puedo orientar antes sobre productos, pedidos o zonas de la tienda.",
@@ -12,9 +42,14 @@ const FALLBACK_REPLIES = [
       "La Caja Friki es una suscripcion mensual pensada para recibir productos sorpresa y ventajas de la tienda. Cuando este activada al 100%, desde aqui podras ver condiciones, gestionar alta y resolver dudas.",
   },
   {
-    pattern: /club|evento|drop|descuento/i,
+    pattern: /club|evento|drop|comunidad/i,
     reply:
       "El Club Friki sirve para recibir avisos de eventos, drops y descuentos de la comunidad. Si quieres, tambien puedo explicarte la diferencia entre Club, Caja Friki y descuentos Arcade.",
+  },
+  {
+    pattern: /descuento|codigo|c[oó]digo|arcade|llave|cup[oó]n|promo/i,
+    reply:
+      "Los descuentos Arcade se conseguiran con juegos, llaves y promociones de la tienda. Cuando el backend de descuentos este activo, el codigo se creara de forma segura y se podra usar en Shopify.",
   },
   {
     pattern: /tienda|empresa|mayorista|profesional|b2b/i,
@@ -31,13 +66,33 @@ const FALLBACK_REPLIES = [
     reply:
       "Para comprar, entra en una categoria, abre el producto, elige variante si existe y anadelo al carrito. Si tienes una duda concreta de envio o pedido, dime la isla o destino y te oriento.",
   },
+  {
+    pattern: /imagen|foto|buscar por imagen|reconocer|localizador|localisador|personaje/i,
+    reply:
+      "El buscador visual servira para subir una imagen y encontrar el anime, personaje o productos relacionados. Mientras activamos la version inteligente, dime que aparece en la imagen y busco por fandom, personaje o categoria.",
+  },
+  {
+    pattern: /admin|panel|administrador|gestionar|estad/i,
+    reply:
+      "El panel administrador es una zona privada para gestionar datos, conversaciones, comerciales, tiendas y descuentos. No debe usarse como panel publico; lo iremos conectando al backend real.",
+  },
+  {
+    pattern: /rese[ñn]a|opini[oó]n|valoraci[oó]n/i,
+    reply:
+      "Las resenas serviran para valorar productos y experiencia. La version final guardara las resenas en backend con moderacion para que no dependan solo del navegador.",
+  },
+  {
+    pattern: /privacidad|legal|datos|cookies|rgpd/i,
+    reply:
+      "La privacidad y textos legales deben quedar completos antes de publicar: datos de empresa, cookies, uso de imagenes, contacto, pedidos y comunicaciones.",
+  },
 ];
 
 function fallbackReply(message) {
   const match = FALLBACK_REPLIES.find((item) => item.pattern.test(message));
   if (match) return match.reply;
 
-  return "Puedo ayudarte con productos, pedidos, Club Friki, Caja Friki, comerciales, tiendas, descuentos o contacto. Dime que necesitas y te guio paso a paso.";
+  return "Puedo ayudarte gratis con orientacion sobre anime, gaming, Disney, multiverso, regalos, pedidos, Club Friki, Caja Friki, descuentos, comerciales, tiendas o contacto. Dime que buscas o para quien es.";
 }
 
 function outputTextFromResponse(data) {
@@ -151,22 +206,21 @@ export async function answerStoreAssistant({ shop, message, customerId = null })
     };
   } catch (error) {
     const errorCode = classifyOpenAIError(error);
-    const reply =
-      "Ahora mismo el asistente IA no puede conectar con el modelo, pero puedo darte ayuda basica: productos, pedidos, Club, comerciales, tiendas o WhatsApp.";
+    const reply = fallbackReply(text);
 
     if (thread) {
       await db.chatMessage.create({
         data: {
           threadId: thread.id,
-          author: "assistant_error",
-          body: `${reply} (${errorCode}: ${error.message})`,
+          author: "assistant_free",
+          body: errorCode === "insufficient_quota" ? reply : `${reply} (${errorCode}: ${error.message})`,
         },
       });
     }
 
     return {
       reply,
-      mode: "error_fallback",
+      mode: "free_rules",
       errorCode,
       threadId: thread?.id,
     };
