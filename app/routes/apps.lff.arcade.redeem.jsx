@@ -22,18 +22,28 @@ export const action = async ({ request }) => {
     return Response.json({ ok: false, error: "Shop ausente." }, { status: 400 });
   }
 
-  const { admin } = await unauthenticated.admin(shop);
-  const redemption = await issueArcadeDiscount({
-    admin,
-    shop,
-    email: body.email || null,
-    keysSpent: body.keysSpent,
-  });
+  try {
+    const { admin } = await unauthenticated.admin(shop);
+    const redemption = await issueArcadeDiscount({
+      admin,
+      shop,
+      email: body.email || null,
+      keysSpent: body.keysSpent,
+    });
 
-  return Response.json({
-    ok: true,
-    code: redemption.code,
-    percent: redemption.discountPercent,
-    customerId,
-  });
+    return Response.json({
+      ok: true,
+      code: redemption.code,
+      percent: redemption.discountPercent,
+      customerId,
+    });
+  } catch (error) {
+    return Response.json(
+      {
+        ok: false,
+        error: error.message || "No se pudo crear el codigo Arcade.",
+      },
+      { status: 400 },
+    );
+  }
 };
