@@ -106,20 +106,33 @@ export async function processWebhookOnce({ id, shop, topic, payload, handler }) 
     return { skipped: true };
   }
 
-  await db.processedWebhook.create({
-    data: {
-      id,
-      shop,
-      topic,
-      payloadJson: JSON.stringify(payload || {}),
-    },
-  });
-
-  if (handler) {
-    await handler();
+  // Reserve the webhook id first so concurrent deliveries cannot process twice.
+  try {
+    await db.processedWebhook.create({
+      data: {
+        id,
+        shop,
+        topic,
+        payloadJson: JSON.stringify(payload || {}),
+      },
+    });
+  } catch (error) {
+    // A concurrent request may have inserted the same unique id.
+    const raced = await db.processedWebhook.findUnique({ where: { id } });
+    if (raced) return { skipped: true };
+    throw error;
   }
 
-  return { skipped: false };
+  try {
+    if (handler) {
+      await handler();
+    }
+    return { skipped: false };
+  } catch (error) {
+    // Do not permanently acknowledge failed work: Shopify can retry it.
+    await db.processedWebhook.delete({ where: { id } }).catch(() => {});
+    throw error;
+  }
 }
 
 export async function createCommercialWithCodes({ admin, shop, name, email }) {
@@ -274,71 +287,109 @@ export async function issueArcadePooledDiscount({
 }) {
   const percentByKeys = { 1: 5, 2: 10, 3: 15, 4: 20, 5: 25, 6: 30 };
   const discountPercent = percentByKeys[Number(keysSpent)] || 0;
+  const normalizedEmail = email ? String(email).trim().toLowerCase() : null;
 
   if (!discountPercent) {
     throw new Error("Llaves Arcade invalidas. Usa de 1 a 6.");
   }
 
-  const availableCode = await db.arcadeDiscountCode.findFirst({
-    where: {
-      shop,
-      discountPercent,
-      status: "available",
-    },
-    orderBy: { createdAt: "asc" },
-  });
-
-  if (!availableCode) {
-    throw new Error(
-      `Codigos Arcade ${discountPercent}% agotados temporalmente.`,
-    );
+  // If this player already has an unused code for the same tier, return it
+  // instead of consuming another code from the pool.
+  if (customerId || normalizedEmail) {
+    const existing = await db.arcadeRedemption.findFirst({
+      where: {
+        shop,
+        discountPercent,
+        status: "issued",
+        OR: [
+          ...(customerId ? [{ customerGid: customerId }] : []),
+          ...(normalizedEmail ? [{ email: normalizedEmail }] : []),
+        ],
+      },
+      orderBy: { createdAt: "desc" },
+    });
+    if (existing) return existing;
   }
 
-  const updatedCode = await db.arcadeDiscountCode.update({
-    where: { id: availableCode.id },
-    data: {
-      status: "assigned",
-      assignedToEmail: email || null,
-      assignedCustomerId: customerId || null,
-      assignedAt: new Date(),
-    },
-  });
+  // Claim with compare-and-swap semantics. updateMany prevents two requests
+  // from receiving the same last available code.
+  for (let attempt = 0; attempt < 8; attempt += 1) {
+    const availableCode = await db.arcadeDiscountCode.findFirst({
+      where: { shop, discountPercent, status: "available" },
+      orderBy: { createdAt: "asc" },
+    });
 
-  const redemption = await db.arcadeRedemption.create({
-    data: {
-      shop,
-      customerGid: customerId,
-      email,
-      keysSpent: Number(keysSpent),
-      discountPercent,
-      code: updatedCode.code,
-      status: "issued",
-    },
-  });
+    if (!availableCode) {
+      throw new Error(`Codigos Arcade ${discountPercent}% agotados temporalmente.`);
+    }
 
-  await db.discountIssuance.create({
-    data: {
-      shop,
-      code: updatedCode.code,
-      kind: "arcade_pool",
-      ownerType: "arcade_player",
-      ownerId: redemption.id,
-      percent: discountPercent,
-      usageLimit: 1,
-      combinesWithJson: JSON.stringify({
-        arcade: false,
-        commercialCapture15: true,
-        commercialPersonal40: false,
-      }),
-    },
-  });
+    const claimed = await db.arcadeDiscountCode.updateMany({
+      where: { id: availableCode.id, status: "available" },
+      data: {
+        status: "assigned",
+        assignedToEmail: normalizedEmail,
+        assignedCustomerId: customerId || null,
+        assignedAt: new Date(),
+      },
+    });
+    if (claimed.count !== 1) continue;
 
-  await recordAudit(shop, "arcade.pool_code_assigned", {
-    targetType: "arcade_redemption",
-    targetId: redemption.id,
-    code: updatedCode.code,
-    discountPercent,
-  });
+    try {
+      const redemption = await db.$transaction(async (tx) => {
+        const created = await tx.arcadeRedemption.create({
+          data: {
+            shop,
+            customerGid: customerId,
+            email: normalizedEmail,
+            keysSpent: Number(keysSpent),
+            discountPercent,
+            code: availableCode.code,
+            status: "issued",
+          },
+        });
 
-  return redemption;
+        await tx.discountIssuance.upsert({
+          where: { code: availableCode.code },
+          update: { ownerId: created.id, status: "created" },
+          create: {
+            shop,
+            code: availableCode.code,
+            kind: "arcade_pool",
+            ownerType: "arcade_player",
+            ownerId: created.id,
+            percent: discountPercent,
+            usageLimit: 1,
+            combinesWithJson: JSON.stringify({
+              arcade: false,
+              commercialCapture15: true,
+              commercialPersonal40: false,
+            }),
+          },
+        });
+        return created;
+      });
+
+      await recordAudit(shop, "arcade.pool_code_assigned", {
+        targetType: "arcade_redemption",
+        targetId: redemption.id,
+        code: availableCode.code,
+        discountPercent,
+      });
+      return redemption;
+    } catch (error) {
+      // Return the code to the pool if creating the redemption fails.
+      await db.arcadeDiscountCode.updateMany({
+        where: { id: availableCode.id, status: "assigned" },
+        data: {
+          status: "available",
+          assignedToEmail: null,
+          assignedCustomerId: null,
+          assignedAt: null,
+        },
+      });
+      throw error;
+    }
+  }
+
+  throw new Error("No se pudo reservar un codigo Arcade. Intentalo de nuevo.");
 }

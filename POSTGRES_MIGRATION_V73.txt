@@ -1,0 +1,12 @@
+LFF BACKEND V73 - POSTGRESQL
+
+Cambios:
+- Prisma datasource cambiado de SQLite a PostgreSQL.
+- Migraciones SQLite sustituidas por un baseline PostgreSQL para una base NUEVA y vacia.
+- DATABASE_URL deja de tener fallback SQLite: el servicio falla de forma explicita si no esta configurada.
+- render.yaml ya no contiene file:./database.sqlite; DATABASE_URL queda como secreto/config externa.
+- Eliminadas las copias SQLite del paquete.
+
+IMPORTANTE:
+- Esta version debe apuntar a la NUEVA base PostgreSQL vacia creada en Render.
+- No ejecutar el baseline sobre una base PostgreSQL que ya tenga las tablas LFF.

@@ -1,0 +1,25 @@
+LA FABRICA FRIKI - V72 - 2026-09-26
+
+CAMBIOS REALIZADOS EN ESTA VERSION
+- Theme: evita cargar theme.js en la home porque la home ya contiene sus scripts por snippets; elimina doble ejecucion.
+- Theme: eliminada la contraseña administrativa literal del JavaScript publico.
+- Theme: desactivado el login administrativo hash/localStorage del storefront; la administracion real debe hacerse desde la app privada Shopify.
+- Backend: processWebhookOnce elimina la reserva si el handler falla para permitir reintento de Shopify.
+- Backend: canje Arcade usa claim atomico por updateMany y reintentos para evitar entregar el mismo codigo en concurrencia.
+- Backend: si un jugador ya tiene un codigo emitido sin usar del mismo porcentaje, devuelve el mismo en vez de gastar otro.
+- Backend: si falla la creacion de la redencion, el codigo vuelve al pool.
+- Backend: orders/paid marca codigos Arcade usados como redeemed aunque no exista codigo de comercial.
+- Backend: atribucion de invitados consulta email para no considerar cada compra como primer pedido.
+
+BLOQUEOS QUE REQUIEREN CUENTA/LOGIN DEL PROPIETARIO
+1. Crear una base de datos PostgreSQL persistente (la SQLite local de Render Free no debe alojar datos finales).
+2. Configurar DATABASE_URL en Render con la URL PostgreSQL antes de migrar el esquema.
+3. Configurar LFF_ADMIN_TOKEN en Render.
+4. Desplegar el backend actualizado y reinstalar/actualizar la app Shopify si cambian scopes/webhooks.
+5. Crear los codigos reales 5/10/15/20/25/30% en Shopify e importarlos en el pool Arcade.
+6. Crear/revisar las colecciones Shopify y cargar productos reales.
+7. Probar checkout real, webhooks orders/paid, comercial, devoluciones y canje Arcade.
+8. Completar datos legales/fiscales definitivos antes de publicar.
+
+IMPORTANTE
+No subir la V72 a produccion como final hasta conectar persistencia real y sustituir los portales Comerciales/Tiendas/Club/Resenas que aun contienen partes demo/localStorage.

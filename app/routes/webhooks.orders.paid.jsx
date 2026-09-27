@@ -29,6 +29,35 @@ export const action = async ({ request }) => {
     payload,
     handler: async () => {
       const codes = orderCodes(payload);
+
+      // Any pooled Arcade code present in a paid order becomes permanently redeemed,
+      // regardless of whether a commercial referral code was also used.
+      const arcadeCodes = await db.arcadeDiscountCode.findMany({
+        where: { shop, code: { in: codes }, status: "assigned" },
+        select: { id: true, code: true },
+      });
+      for (const arcadeCode of arcadeCodes) {
+        await db.$transaction([
+          db.arcadeDiscountCode.update({
+            where: { id: arcadeCode.id },
+            data: { status: "redeemed" },
+          }),
+          db.arcadeRedemption.updateMany({
+            where: { shop, code: arcadeCode.code, status: "issued" },
+            data: { status: "redeemed", redeemedAt: new Date() },
+          }),
+          db.discountIssuance.updateMany({
+            where: { shop, code: arcadeCode.code },
+            data: { status: "redeemed" },
+          }),
+        ]);
+        await recordAudit(shop, "arcade.code_redeemed", {
+          targetType: "arcade_code",
+          targetId: arcadeCode.id,
+          code: arcadeCode.code,
+          orderGid: String(payload.admin_graphql_api_id || payload.id),
+        });
+      }
       const commercial = await db.commercialUser.findFirst({
         where: {
           shop,
@@ -53,13 +82,15 @@ export const action = async ({ request }) => {
       const existingAttribution = customerGid
         ? await db.commercialCustomerAttribution.findUnique({
             where: {
-              shop_customerGid: {
-                shop,
-                customerGid,
-              },
+              shop_customerGid: { shop, customerGid },
             },
           })
-        : null;
+        : customerEmail
+          ? await db.commercialCustomerAttribution.findFirst({
+              where: { shop, customerEmail },
+              orderBy: { createdAt: "asc" },
+            })
+          : null;
 
       const isFirstAttributedOrder = !existingAttribution?.firstOrderAt;
       const rateBps = isFirstAttributedOrder ? 3000 : 1000;
@@ -140,6 +171,7 @@ export const action = async ({ request }) => {
         basisCents,
         amountCents,
       });
+
     },
   });
 
