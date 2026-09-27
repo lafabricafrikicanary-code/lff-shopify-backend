@@ -10,9 +10,11 @@ import { boundary } from "@shopify/shopify-app-react-router/server";
 import { authenticate } from "../shopify.server";
 import db from "../db.server";
 import {
+  createArcadePoolBatch,
   createCommercialWithCodes,
   issueArcadeDiscount,
   recordAudit,
+  syncArcadePoolJobs,
 } from "../lib/lff.server";
 
 export const loader = async ({ request }) => {
@@ -28,6 +30,7 @@ export const loader = async ({ request }) => {
     latestCommercials,
     latestB2B,
     latestDiscounts,
+    arcadePoolGroups,
   ] = await Promise.all([
     db.commercialUser.count({ where: { shop } }),
     db.b2BCompany.count({ where: { shop, status: "pending" } }),
@@ -49,7 +52,34 @@ export const loader = async ({ request }) => {
       orderBy: { createdAt: "desc" },
       take: 8,
     }),
+    db.arcadeDiscountCode.groupBy({
+      by: ["discountPercent", "status"],
+      where: { shop },
+      _count: { id: true },
+    }),
   ]);
+
+  const arcadePool = [5, 10, 15, 20, 25, 30].map((percent) => {
+    const row = {
+      id: `pool-${percent}`,
+      discountPercent: percent,
+      available: 0,
+      pending: 0,
+      assigned: 0,
+      redeemed: 0,
+      failed: 0,
+    };
+    for (const group of arcadePoolGroups) {
+      if (group.discountPercent === percent && group.status in row) {
+        row[group.status] = group._count.id;
+      }
+    }
+    return row;
+  });
+  const arcadePoolAvailable = arcadePool.reduce(
+    (total, row) => total + row.available,
+    0,
+  );
 
   return {
     shop,
@@ -59,7 +89,9 @@ export const loader = async ({ request }) => {
       openChatCount,
       arcadeIssuedCount,
       discountCount,
+      arcadePoolAvailable,
     },
+    arcadePool,
     latestCommercials,
     latestB2B,
     latestDiscounts,
@@ -136,6 +168,31 @@ export const action = async ({ request }) => {
       return {
         ok: true,
         message: `Codigo Arcade creado: ${redemption.code} (${redemption.discountPercent}%)`,
+      };
+    }
+
+    if (intent === "generate-arcade-pool") {
+      const discountPercent = Number(formData.get("discountPercent") || 0);
+      const quantity = Number(formData.get("quantity") || 100);
+      const result = await createArcadePoolBatch({
+        admin,
+        shop,
+        discountPercent,
+        quantity,
+      });
+      const available = result.statusCounts.find((row) => row.status === "available")?._count.id || 0;
+      const pending = result.statusCounts.find((row) => row.status === "pending")?._count.id || 0;
+      return {
+        ok: true,
+        message: `Lote Arcade ${discountPercent}% creado. Disponibles: ${available}. Pendientes de Shopify: ${pending}.`,
+      };
+    }
+
+    if (intent === "sync-arcade-pool") {
+      const result = await syncArcadePoolJobs({ admin, shop });
+      return {
+        ok: true,
+        message: `Bolsa sincronizada. Activados: ${result.activated}. Fallidos: ${result.failed}. Lotes aun pendientes: ${result.waiting}.`,
       };
     }
 
@@ -221,7 +278,7 @@ function SimpleTable({ rows, columns, empty }) {
                     fontSize: 13,
                   }}
                 >
-                  {column.render ? column.render(row) : row[column.key] || "-"}
+                  {column.render ? column.render(row) : (row[column.key] ?? "-")}
                 </td>
               ))}
             </tr>
@@ -265,6 +322,7 @@ export default function Index() {
           <Stat label="Chats abiertos" value={data.counters.openChatCount} />
           <Stat label="Canjes Arcade" value={data.counters.arcadeIssuedCount} />
           <Stat label="Codigos emitidos" value={data.counters.discountCount} />
+          <Stat label="Arcade disponibles" value={data.counters.arcadePoolAvailable} />
         </div>
       </s-section>
 
@@ -299,10 +357,83 @@ export default function Index() {
         </Form>
       </s-section>
 
+
+      <s-section heading="Bolsa Arcade Shopify">
+        <s-paragraph>
+          Crea lotes de codigos reales de Shopify para que el Arcade los entregue
+          automaticamente al canjear llaves. Cada lote usa un porcentaje fijo y
+          cada codigo queda registrado en PostgreSQL.
+        </s-paragraph>
+        <Form method="post">
+          <input type="hidden" name="intent" value="generate-arcade-pool" />
+          <label style={{ display: "block", marginBottom: 12 }}>
+            <span style={{ display: "block", fontWeight: 650, marginBottom: 6 }}>
+              Porcentaje
+            </span>
+            <select
+              name="discountPercent"
+              defaultValue="5"
+              style={{ width: "100%", padding: "9px 11px", borderRadius: 6 }}
+            >
+              {[5, 10, 15, 20, 25, 30].map((percent) => (
+                <option key={percent} value={percent}>
+                  {percent}%
+                </option>
+              ))}
+            </select>
+          </label>
+          <label style={{ display: "block", marginBottom: 12 }}>
+            <span style={{ display: "block", fontWeight: 650, marginBottom: 6 }}>
+              Cantidad de codigos
+            </span>
+            <input
+              name="quantity"
+              type="number"
+              min="1"
+              max="250"
+              defaultValue="100"
+              required
+              style={{
+                width: "100%",
+                border: "1px solid #c9cccf",
+                borderRadius: 6,
+                padding: "9px 11px",
+                fontSize: 14,
+              }}
+            />
+          </label>
+          <button type="submit" disabled={busy}>
+            Crear lote en Shopify
+          </button>
+        </Form>
+        <div style={{ marginTop: 12 }}>
+          <Form method="post">
+            <input type="hidden" name="intent" value="sync-arcade-pool" />
+            <button type="submit" disabled={busy}>
+              Sincronizar lotes pendientes
+            </button>
+          </Form>
+        </div>
+        <div style={{ marginTop: 16 }}>
+          <SimpleTable
+            rows={data.arcadePool}
+            empty="Aun no hay codigos en la bolsa Arcade."
+            columns={[
+              { key: "discountPercent", label: "%" },
+              { key: "available", label: "Disponibles" },
+              { key: "pending", label: "Pendientes" },
+              { key: "assigned", label: "Asignados" },
+              { key: "redeemed", label: "Canjeados" },
+              { key: "failed", label: "Fallidos" },
+            ]}
+          />
+        </div>
+      </s-section>
+
       <s-section heading="Emitir codigo Arcade">
         <s-paragraph>
-          Emite un codigo de un solo uso segun llaves canjeadas. El canje real
-          del storefront se conectara a este mismo servicio.
+          Herramienta manual de prueba: crea un codigo individual directamente
+          en Shopify. El Arcade publico usa la bolsa gestionada arriba.
         </s-paragraph>
         <Form method="post">
           <input type="hidden" name="intent" value="issue-arcade" />

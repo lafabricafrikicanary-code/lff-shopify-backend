@@ -1,3 +1,4 @@
+import { randomBytes } from "node:crypto";
 import db from "../db.server";
 
 export function normalizeCode(value) {
@@ -392,4 +393,226 @@ export async function issueArcadePooledDiscount({
   }
 
   throw new Error("No se pudo reservar un codigo Arcade. Intentalo de nuevo.");
+}
+
+
+function makeArcadePoolCode(discountPercent, index) {
+  const token = randomBytes(4).toString("hex").toUpperCase();
+  const stamp = Date.now().toString(36).toUpperCase();
+  return normalizeCode(`ARCADE${discountPercent}-LFF-${stamp}-${index}-${token}`);
+}
+
+async function getArcadeBulkCreation(admin, id) {
+  const response = await admin.graphql(
+    `#graphql
+      query LffArcadeBulkCreation($id: ID!) {
+        discountRedeemCodeBulkCreation(id: $id) {
+          id
+          done
+          codesCount
+          importedCount
+          failedCount
+          codes(first: 250) {
+            nodes {
+              code
+              discountRedeemCode {
+                code
+              }
+              errors {
+                message
+              }
+            }
+          }
+        }
+      }`,
+    { variables: { id } },
+  );
+  const json = await response.json();
+  if (json.errors?.length) {
+    throw new Error(json.errors.map((error) => error.message).join("; "));
+  }
+  return json.data?.discountRedeemCodeBulkCreation || null;
+}
+
+export async function syncArcadePoolJobs({ admin, shop }) {
+  const pending = await db.arcadeDiscountCode.findMany({
+    where: { shop, status: "pending" },
+    select: { source: true },
+  });
+
+  const jobIds = [
+    ...new Set(
+      pending
+        .map((row) => String(row.source || ""))
+        .filter((source) => source.startsWith("shopify_bulk:"))
+        .map((source) => source.slice("shopify_bulk:".length))
+        .filter(Boolean),
+    ),
+  ];
+
+  let activated = 0;
+  let failed = 0;
+  let waiting = 0;
+
+  for (const jobId of jobIds) {
+    const job = await getArcadeBulkCreation(admin, jobId);
+    if (!job || !job.done) {
+      waiting += 1;
+      continue;
+    }
+
+    const successfulCodes = (job.codes?.nodes || [])
+      .filter((node) => node.discountRedeemCode)
+      .map((node) => String(node.code || node.discountRedeemCode.code || "").toUpperCase())
+      .filter(Boolean);
+    const failedCodes = (job.codes?.nodes || [])
+      .filter((node) => !node.discountRedeemCode)
+      .map((node) => String(node.code || "").toUpperCase())
+      .filter(Boolean);
+
+    if (successfulCodes.length) {
+      const result = await db.arcadeDiscountCode.updateMany({
+        where: { shop, code: { in: successfulCodes }, status: "pending" },
+        data: { status: "available" },
+      });
+      activated += result.count;
+    }
+
+    if (failedCodes.length) {
+      const result = await db.arcadeDiscountCode.updateMany({
+        where: { shop, code: { in: failedCodes }, status: "pending" },
+        data: { status: "failed" },
+      });
+      failed += result.count;
+    }
+  }
+
+  return { activated, failed, waiting, jobs: jobIds.length };
+}
+
+export async function createArcadePoolBatch({
+  admin,
+  shop,
+  discountPercent,
+  quantity = 100,
+}) {
+  const percent = Number(discountPercent);
+  const count = Number(quantity);
+
+  if (![5, 10, 15, 20, 25, 30].includes(percent)) {
+    throw new Error("Porcentaje Arcade invalido.");
+  }
+  if (!Number.isInteger(count) || count < 1 || count > 250) {
+    throw new Error("La cantidad debe estar entre 1 y 250 codigos.");
+  }
+
+  const codes = Array.from({ length: count }, (_, index) =>
+    makeArcadePoolCode(percent, index + 1),
+  );
+  const primaryCode = codes[0];
+
+  const discount = await createPercentageCode(admin, {
+    title: `LFF Arcade Pool ${percent}%`,
+    code: primaryCode,
+    percent,
+    usageLimit: 1,
+    appliesOncePerCustomer: true,
+    combinesWith: {
+      orderDiscounts: false,
+      productDiscounts: false,
+      shippingDiscounts: false,
+    },
+  });
+
+  await db.arcadeDiscountCode.create({
+    data: {
+      shop,
+      code: primaryCode,
+      discountPercent: percent,
+      status: "available",
+      source: `shopify_bulk_primary:${discount.id}`,
+    },
+  });
+
+  let bulkId = null;
+  if (codes.length > 1) {
+    const response = await admin.graphql(
+      `#graphql
+        mutation LffArcadeBulkAdd($discountId: ID!, $codes: [DiscountRedeemCodeInput!]!) {
+          discountRedeemCodeBulkAdd(discountId: $discountId, codes: $codes) {
+            bulkCreation {
+              id
+            }
+            userErrors {
+              field
+              message
+              code
+            }
+          }
+        }`,
+      {
+        variables: {
+          discountId: discount.id,
+          codes: codes.slice(1).map((code) => ({ code })),
+        },
+      },
+    );
+
+    const json = await response.json();
+    const result = json.data?.discountRedeemCodeBulkAdd;
+    const errors = result?.userErrors || json.errors || [];
+    if (errors.length) {
+      throw new Error(errors.map((error) => error.message).join("; "));
+    }
+    bulkId = result?.bulkCreation?.id || null;
+    if (!bulkId) {
+      throw new Error("Shopify no devolvio el identificador del lote Arcade.");
+    }
+
+    await db.arcadeDiscountCode.createMany({
+      data: codes.slice(1).map((code) => ({
+        shop,
+        code,
+        discountPercent: percent,
+        status: "pending",
+        source: `shopify_bulk:${bulkId}`,
+      })),
+      skipDuplicates: true,
+    });
+
+    // The Shopify bulk operation is asynchronous. Give it a short window to
+    // finish so most batches become immediately usable, while keeping a safe
+    // pending state if Shopify needs longer.
+    for (let attempt = 0; attempt < 20; attempt += 1) {
+      const job = await getArcadeBulkCreation(admin, bulkId);
+      if (job?.done) break;
+      await new Promise((resolve) => setTimeout(resolve, 250));
+    }
+  }
+
+  const sync = await syncArcadePoolJobs({ admin, shop });
+
+  await recordAudit(shop, "arcade.pool_batch_created", {
+    targetType: "arcade_pool",
+    targetId: discount.id,
+    discountPercent: percent,
+    requested: count,
+    bulkId,
+    sync,
+  });
+
+  const statusCounts = await db.arcadeDiscountCode.groupBy({
+    by: ["status"],
+    where: { shop, discountPercent: percent },
+    _count: { id: true },
+  });
+
+  return {
+    discountPercent: percent,
+    requested: count,
+    discountId: discount.id,
+    bulkId,
+    statusCounts,
+    sync,
+  };
 }

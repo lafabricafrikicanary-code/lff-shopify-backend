@@ -41,8 +41,8 @@ export const loader = async ({ request }) => {
 
   requireAdmin(request);
 
-  const url = new URL(request.url);
-  const shop = url.searchParams.get("shop") || "lafabricafriki.myshopify.com";
+  const shop =
+    process.env.SHOPIFY_SHOP_DOMAIN || "lafabricafriki.myshopify.com";
   const counts = await db.arcadeDiscountCode.groupBy({
     by: ["discountPercent", "status"],
     where: { shop },
@@ -60,7 +60,9 @@ export const action = async ({ request }) => {
   requireAdmin(request);
 
   const body = await bodyData(request);
-  const shop = String(body.shop || "lafabricafriki.myshopify.com").trim();
+  const shop = String(
+    process.env.SHOPIFY_SHOP_DOMAIN || "lafabricafriki.myshopify.com",
+  ).trim();
   const discountPercent = Number(body.discountPercent);
   const codes = Array.isArray(body.codes)
     ? body.codes.map(String)

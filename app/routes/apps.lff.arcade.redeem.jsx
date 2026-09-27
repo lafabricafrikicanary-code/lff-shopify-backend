@@ -21,9 +21,10 @@ export const action = async ({ request }) => {
   }
 
   const url = new URL(request.url);
+  // Single-merchant app: never trust a storefront-supplied shop override.
   const shop =
-    url.searchParams.get("shop") ||
     process.env.SHOPIFY_SHOP_DOMAIN ||
+    url.searchParams.get("shop") ||
     "lafabricafriki.myshopify.com";
   const customerId = url.searchParams.get("logged_in_customer_id");
   const body = await bodyData(request);
