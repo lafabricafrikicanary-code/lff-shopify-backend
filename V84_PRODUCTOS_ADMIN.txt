@@ -1,0 +1,22 @@
+LFF BACKEND V84 — PRODUCTOS DESDE PANEL ADMIN
+
+Cambios:
+- Nueva API segura /api/lff/admin/products, protegida por la sesión real de Alejandro/Gabriel.
+- Crear un producto LFF en borrador con la matriz exacta de 754 variantes del sistema unificado.
+- Opciones: Modelo -> Color -> Talla.
+- Modelos: Camisa hombre, Camisa mujer, Camisa infantil, Sudadera, Top y Crop top.
+- Precios reales en variantes nuevas: infantil 15,99 €, sudadera 29,99 €, resto 19,99 €.
+- Subida de mockups a Shopify desde el panel.
+- Vincular una imagen a todas las tallas de una combinación Modelo + Color.
+- Aplicar precios LFF a productos unificados existentes.
+- Cambiar producto a borrador y publicar en Tienda online.
+- No copia ninguna imagen del producto de referencia; solo reutiliza su matriz validada de combinaciones.
+
+Nuevos permisos Shopify necesarios:
+- write_products
+- read_publications
+- write_publications
+
+IMPORTANTE:
+Después de desplegar el backend, actualizar también SCOPES en Render y conceder/revisar los permisos en la app OpenClaw Backend LFF antes de intentar crear/publicar productos.
+No requiere migración de PostgreSQL.

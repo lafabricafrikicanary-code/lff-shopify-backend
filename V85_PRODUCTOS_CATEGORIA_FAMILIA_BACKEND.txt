@@ -1,0 +1,6 @@
+V85 BACKEND — CATEGORÍA + FAMILIA
+
+- El endpoint de Productos exige categoría y familia al crear desde plantilla.
+- Las guarda en Shopify como etiquetas organizativas: LFF_CATEGORY:<...>, LFF_FAMILY:<...> y slugs simples.
+- No requiere migración PostgreSQL.
+- Mantiene todas las funciones V84.
