@@ -34,20 +34,102 @@ model Session {
 }
 
 model CommercialUser {
-  id                        String   @id @default(cuid())
+  id                        String    @id @default(cuid())
   shop                      String
   name                      String
   email                     String?
-  captureCode               String   @unique
-  personalCode              String   @unique
-  status                    String   @default("active")
+  phone                     String?
+  channel                   String?
+  about                     String?
+  captureCode               String    @unique
+  personalCode              String    @unique
+  status                    String    @default("active")
+  passwordHash              String?
+  passwordSalt              String?
+  forceChange               Boolean   @default(false)
+  failedAttempts            Int       @default(0)
+  lockedUntil               DateTime?
+  lastLoginAt               DateTime?
+  shopifyCustomerId         String?
   shopifyCaptureDiscountId  String?
   shopifyPersonalDiscountId String?
-  createdAt                 DateTime @default(now())
-  updatedAt                 DateTime @updatedAt
+  createdAt                 DateTime  @default(now())
+  updatedAt                 DateTime  @updatedAt
 
   attributions CommercialCustomerAttribution[]
   commissions  Commission[]
+  sessions     CommercialSession[]
+}
+
+model CommercialApplication {
+  id            String    @id @default(cuid())
+  shop          String
+  name          String
+  email         String
+  phone         String?
+  channel       String?
+  about         String?
+  inviterCode   String?
+  passwordHash  String
+  passwordSalt  String
+  status        String    @default("pending")
+  commercialId  String?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+  decidedAt     DateTime?
+
+  @@unique([shop, email])
+  @@index([shop, status])
+}
+
+model CommercialSession {
+  id           String         @id @default(cuid())
+  tokenHash    String         @unique
+  commercialId String
+  createdAt    DateTime       @default(now())
+  lastSeenAt   DateTime       @default(now())
+  expiresAt    DateTime
+
+  commercial CommercialUser @relation(fields: [commercialId], references: [id], onDelete: Cascade)
+
+  @@index([commercialId, expiresAt])
+}
+
+model AdminUser {
+  id                 String    @id @default(cuid())
+  shop               String
+  username           String
+  displayName        String
+  role               String    @default("admin")
+  passwordHash       String
+  passwordSalt       String
+  enabled            Boolean   @default(true)
+  forceChange        Boolean   @default(false)
+  failedAttempts     Int       @default(0)
+  lockedUntil        DateTime?
+  lastLoginAt        DateTime?
+  lastSeenAt         DateTime?
+  totalActiveSeconds Int       @default(0)
+  createdAt          DateTime  @default(now())
+  updatedAt          DateTime  @updatedAt
+
+  sessions AdminSession[]
+
+  @@unique([shop, username])
+  @@index([shop, role])
+}
+
+model AdminSession {
+  id          String    @id @default(cuid())
+  tokenHash   String    @unique
+  adminUserId String
+  createdAt   DateTime  @default(now())
+  lastSeenAt  DateTime  @default(now())
+  expiresAt   DateTime
+
+  adminUser AdminUser @relation(fields: [adminUserId], references: [id], onDelete: Cascade)
+
+  @@index([adminUserId, expiresAt])
 }
 
 model CommercialCustomerAttribution {

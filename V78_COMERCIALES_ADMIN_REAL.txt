@@ -1,0 +1,12 @@
+LFF BACKEND — V78 COMERCIALES + ADMIN REAL
+
+Incluye:
+- Restricción del código personal 40% a un Customer de Shopify asociado al comercial.
+- Solicitudes/comerciales y sesiones persistentes en PostgreSQL.
+- API pública autenticada para portal comercial.
+- Cuentas administrativas persistentes Alejandro y Gabriel con cambio de contraseña.
+- Sesiones admin opacas y contraseñas scrypt.
+- Alejandro puede activar/desactivar a Gabriel y consultar/reiniciar tiempo activo.
+- Nueva migración Prisma 20260928030000_commercial_admin_auth.
+
+Subir los archivos manteniendo las rutas sobre la rama v73-postgres.

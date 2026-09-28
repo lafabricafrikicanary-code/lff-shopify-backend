@@ -23,6 +23,9 @@ export function centsFromShopifyAmount(value) {
 
 export async function createPercentageCode(admin, input) {
   const startsAt = input.startsAt || new Date().toISOString();
+  const context = input.customerIds?.length
+    ? { customers: { add: input.customerIds } }
+    : { all: "ALL" };
   const response = await admin.graphql(
     `#graphql
       mutation LffCreateBasicDiscount($discount: DiscountCodeBasicInput!) {
@@ -56,7 +59,7 @@ export async function createPercentageCode(admin, input) {
           startsAt,
           usageLimit: input.usageLimit ?? null,
           appliesOncePerCustomer: input.appliesOncePerCustomer ?? false,
-          customerSelection: { all: true },
+          context,
           customerGets: {
             value: {
               percentage: Number(input.percent) / 100,
@@ -82,6 +85,82 @@ export async function createPercentageCode(admin, input) {
   }
 
   return result.codeDiscountNode;
+}
+
+
+export async function findOrCreateShopifyCustomer(admin, { email, name }) {
+  const normalizedEmail = String(email || "").trim().toLowerCase();
+  if (!normalizedEmail) throw new Error("El comercial necesita un correo para vincular su código propio del 40%.");
+  const queryResponse = await admin.graphql(
+    `#graphql
+      query LffFindCustomerByEmail($query: String!) {
+        customers(first: 1, query: $query) {
+          nodes { id email }
+        }
+      }`,
+    { variables: { query: `email:${normalizedEmail}` } },
+  );
+  const queryJson = await queryResponse.json();
+  const found = queryJson.data?.customers?.nodes?.[0];
+  if (found?.id) return found;
+
+  const parts = String(name || "").trim().split(/\s+/).filter(Boolean);
+  const firstName = parts.shift() || "Comercial";
+  const lastName = parts.join(" ") || undefined;
+  const createResponse = await admin.graphql(
+    `#graphql
+      mutation LffCreateCommercialCustomer($input: CustomerInput!) {
+        customerCreate(input: $input) {
+          customer { id email }
+          userErrors { field message }
+        }
+      }`,
+    { variables: { input: { email: normalizedEmail, firstName, ...(lastName ? { lastName } : {}) } } },
+  );
+  const createJson = await createResponse.json();
+  const errors = createJson.data?.customerCreate?.userErrors || createJson.errors || [];
+  if (errors.length) throw new Error(errors.map((error) => error.message).join("; "));
+  return createJson.data?.customerCreate?.customer;
+}
+
+export async function restrictCommercialPersonalDiscount(admin, commercial) {
+  if (!commercial?.shopifyPersonalDiscountId) throw new Error("El comercial no tiene descuento 40% en Shopify.");
+  const customer = await findOrCreateShopifyCustomer(admin, {
+    email: commercial.email,
+    name: commercial.name,
+  });
+  const response = await admin.graphql(
+    `#graphql
+      mutation LffRestrictPersonalDiscount($id: ID!, $discount: DiscountCodeBasicInput!) {
+        discountCodeBasicUpdate(id: $id, basicCodeDiscount: $discount) {
+          codeDiscountNode { id }
+          userErrors { field message code }
+        }
+      }`,
+    {
+      variables: {
+        id: commercial.shopifyPersonalDiscountId,
+        discount: {
+          context: { customers: { add: [customer.id] } },
+          appliesOncePerCustomer: false,
+        },
+      },
+    },
+  );
+  const json = await response.json();
+  const errors = json.data?.discountCodeBasicUpdate?.userErrors || json.errors || [];
+  if (errors.length) throw new Error(errors.map((error) => error.message).join("; "));
+  await db.commercialUser.update({
+    where: { id: commercial.id },
+    data: { shopifyCustomerId: customer.id },
+  });
+  await recordAudit(commercial.shop, "commercial.personal_discount_restricted", {
+    targetType: "commercial",
+    targetId: commercial.id,
+    customerId: customer.id,
+    code: commercial.personalCode,
+  });
+  return customer;
 }
 
 export async function recordAudit(shop, action, details = {}) {
@@ -136,9 +215,21 @@ export async function processWebhookOnce({ id, shop, topic, payload, handler }) 
   }
 }
 
-export async function createCommercialWithCodes({ admin, shop, name, email }) {
+export async function createCommercialWithCodes({
+  admin,
+  shop,
+  name,
+  email,
+  phone = null,
+  channel = null,
+  about = null,
+  passwordHash = null,
+  passwordSalt = null,
+}) {
+  if (!email) throw new Error("El comercial necesita correo para crear su cuenta y proteger el código propio del 40%.");
   const captureCode = makeCode("LFF15", name || email || "COMERCIAL");
   const personalCode = makeCode("LFF40", name || email || "PROPIO");
+  const shopifyCustomer = await findOrCreateShopifyCustomer(admin, { email, name });
 
   const captureDiscount = await createPercentageCode(admin, {
     title: `LFF comercial captacion - ${name}`,
@@ -156,6 +247,7 @@ export async function createCommercialWithCodes({ admin, shop, name, email }) {
     title: `LFF comercial propio 40 - ${name}`,
     code: personalCode,
     percent: 40,
+    customerIds: [shopifyCustomer.id],
     appliesOncePerCustomer: false,
     combinesWith: {
       orderDiscounts: false,
@@ -169,8 +261,14 @@ export async function createCommercialWithCodes({ admin, shop, name, email }) {
       shop,
       name,
       email,
+      phone,
+      channel,
+      about,
+      passwordHash,
+      passwordSalt,
       captureCode,
       personalCode,
+      shopifyCustomerId: shopifyCustomer.id,
       shopifyCaptureDiscountId: captureDiscount.id,
       shopifyPersonalDiscountId: personalDiscount.id,
     },

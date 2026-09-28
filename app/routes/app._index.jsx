@@ -14,6 +14,7 @@ import {
   createCommercialWithCodes,
   issueArcadeDiscount,
   recordAudit,
+  restrictCommercialPersonalDiscount,
   syncArcadePoolJobs,
 } from "../lib/lff.server";
 
@@ -28,6 +29,7 @@ export const loader = async ({ request }) => {
     arcadeIssuedCount,
     discountCount,
     latestCommercials,
+    pendingCommercialApplications,
     latestB2B,
     latestDiscounts,
     arcadePoolGroups,
@@ -40,7 +42,12 @@ export const loader = async ({ request }) => {
     db.commercialUser.findMany({
       where: { shop },
       orderBy: { createdAt: "desc" },
-      take: 5,
+      take: 10,
+    }),
+    db.commercialApplication.findMany({
+      where: { shop, status: "pending" },
+      orderBy: { createdAt: "asc" },
+      take: 20,
     }),
     db.b2BCompany.findMany({
       where: { shop },
@@ -93,6 +100,7 @@ export const loader = async ({ request }) => {
     },
     arcadePool,
     latestCommercials,
+    pendingCommercialApplications,
     latestB2B,
     latestDiscounts,
   };
@@ -112,18 +120,86 @@ export const action = async ({ request }) => {
       if (!name) {
         throw new Error("Pon un nombre para el comercial.");
       }
+      if (!email) {
+        throw new Error("Pon el correo del comercial. Es necesario para proteger su código propio del 40%.");
+      }
 
       const commercial = await createCommercialWithCodes({
         admin,
         shop,
         name,
-        email: email || null,
+        email,
       });
 
       return {
         ok: true,
         message: `Comercial creado: ${commercial.captureCode} y ${commercial.personalCode}`,
       };
+    }
+
+    if (intent === "approve-commercial-application") {
+      const applicationId = String(formData.get("applicationId") || "");
+      const application = await db.commercialApplication.findFirst({
+        where: { id: applicationId, shop, status: "pending" },
+      });
+      if (!application) throw new Error("La solicitud ya no está pendiente.");
+      const commercial = await createCommercialWithCodes({
+        admin,
+        shop,
+        name: application.name,
+        email: application.email,
+        phone: application.phone,
+        channel: application.channel,
+        about: application.about,
+        passwordHash: application.passwordHash,
+        passwordSalt: application.passwordSalt,
+      });
+      await db.commercialApplication.update({
+        where: { id: application.id },
+        data: { status: "approved", commercialId: commercial.id, decidedAt: new Date() },
+      });
+      await recordAudit(shop, "commercial.application_approved", {
+        targetType: "commercial_application",
+        targetId: application.id,
+        commercialId: commercial.id,
+      });
+      return { ok: true, message: `Solicitud aprobada. Comercial activo: ${commercial.name}` };
+    }
+
+    if (intent === "reject-commercial-application") {
+      const applicationId = String(formData.get("applicationId") || "");
+      const application = await db.commercialApplication.findFirst({
+        where: { id: applicationId, shop, status: "pending" },
+      });
+      if (!application) throw new Error("La solicitud ya no está pendiente.");
+      await db.commercialApplication.update({
+        where: { id: application.id },
+        data: { status: "rejected", decidedAt: new Date() },
+      });
+      await recordAudit(shop, "commercial.application_rejected", {
+        targetType: "commercial_application",
+        targetId: application.id,
+      });
+      return { ok: true, message: `Solicitud rechazada: ${application.email}` };
+    }
+
+    if (intent === "secure-commercial-40") {
+      const commercialId = String(formData.get("commercialId") || "");
+      const commercial = await db.commercialUser.findFirst({ where: { id: commercialId, shop } });
+      if (!commercial) throw new Error("No se encontró el comercial.");
+      await restrictCommercialPersonalDiscount(admin, commercial);
+      return { ok: true, message: `Código propio 40% protegido para ${commercial.email}.` };
+    }
+
+    if (intent === "toggle-commercial") {
+      const commercialId = String(formData.get("commercialId") || "");
+      const commercial = await db.commercialUser.findFirst({ where: { id: commercialId, shop } });
+      if (!commercial) throw new Error("No se encontró el comercial.");
+      const status = commercial.status === "active" ? "suspended" : "active";
+      await db.commercialUser.update({ where: { id: commercial.id }, data: { status } });
+      if (status !== "active") await db.commercialSession.deleteMany({ where: { commercialId: commercial.id } });
+      await recordAudit(shop, "commercial.status_changed", { targetType: "commercial", targetId: commercial.id, status });
+      return { ok: true, message: `${commercial.name}: ${status}` };
     }
 
     if (intent === "create-b2b") {
@@ -135,13 +211,23 @@ export const action = async ({ request }) => {
         throw new Error("Pon el nombre de la tienda.");
       }
 
+      const referredCommercial = referredByCode
+        ? await db.commercialUser.findFirst({
+            where: { shop, status: "active", captureCode: referredByCode.toUpperCase() },
+          })
+        : null;
+      if (referredByCode && !referredCommercial) {
+        throw new Error("El codigo comercial referido no es valido.");
+      }
+
       const b2b = await db.b2BCompany.create({
         data: {
           shop,
           companyName,
           contactEmail: contactEmail || null,
           referredByCode: referredByCode || null,
-          priceTier: referredByCode ? "referred_55_first_63" : "direct_60",
+          commercialId: referredCommercial?.id || null,
+          priceTier: referredCommercial ? "referred_55_first_63" : "direct_60",
         },
       });
 
@@ -334,7 +420,7 @@ export default function Index() {
         <Form method="post">
           <input type="hidden" name="intent" value="create-commercial" />
           <Field label="Nombre" name="name" required placeholder="Nombre comercial" />
-          <Field label="Email" name="email" type="email" placeholder="email@ejemplo.com" />
+          <Field label="Email" name="email" type="email" required placeholder="email@ejemplo.com" />
           <button type="submit" disabled={busy}>
             Crear comercial y codigos
           </button>
@@ -445,6 +531,37 @@ export default function Index() {
         </Form>
       </s-section>
 
+      <s-section heading="Solicitudes de comerciales">
+        <SimpleTable
+          rows={data.pendingCommercialApplications}
+          empty="No hay solicitudes pendientes."
+          columns={[
+            { key: "name", label: "Nombre" },
+            { key: "email", label: "Email" },
+            { key: "phone", label: "Telefono" },
+            { key: "channel", label: "Canal" },
+            {
+              key: "actions",
+              label: "Acciones",
+              render: (row) => (
+                <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                  <Form method="post">
+                    <input type="hidden" name="intent" value="approve-commercial-application" />
+                    <input type="hidden" name="applicationId" value={row.id} />
+                    <button type="submit" disabled={busy}>Aprobar</button>
+                  </Form>
+                  <Form method="post">
+                    <input type="hidden" name="intent" value="reject-commercial-application" />
+                    <input type="hidden" name="applicationId" value={row.id} />
+                    <button type="submit" disabled={busy}>Rechazar</button>
+                  </Form>
+                </div>
+              ),
+            },
+          ]}
+        />
+      </s-section>
+
       <s-section heading="Ultimos comerciales">
         <SimpleTable
           rows={data.latestCommercials}
@@ -454,7 +571,29 @@ export default function Index() {
             { key: "email", label: "Email" },
             { key: "captureCode", label: "Captacion 15%" },
             { key: "personalCode", label: "Propio 40%" },
+            {
+              key: "protected40",
+              label: "40% protegido",
+              render: (row) => row.shopifyCustomerId ? "Si" : (
+                <Form method="post">
+                  <input type="hidden" name="intent" value="secure-commercial-40" />
+                  <input type="hidden" name="commercialId" value={row.id} />
+                  <button type="submit" disabled={busy}>Proteger ahora</button>
+                </Form>
+              ),
+            },
             { key: "status", label: "Estado" },
+            {
+              key: "toggle",
+              label: "Acceso",
+              render: (row) => (
+                <Form method="post">
+                  <input type="hidden" name="intent" value="toggle-commercial" />
+                  <input type="hidden" name="commercialId" value={row.id} />
+                  <button type="submit" disabled={busy}>{row.status === "active" ? "Suspender" : "Activar"}</button>
+                </Form>
+              ),
+            },
           ]}
         />
       </s-section>
