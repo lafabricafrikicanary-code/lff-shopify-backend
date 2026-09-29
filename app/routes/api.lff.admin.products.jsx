@@ -48,6 +48,23 @@ function organizationalTags(category, family) {
   return tags;
 }
 
+function taxonomyFromTags(tags = []) {
+  const list = Array.isArray(tags) ? tags.map((tag) => String(tag || "").trim()).filter(Boolean) : [];
+  const categoryTag = list.find((tag) => /^LFF_CATEGORY:/i.test(tag)) || "";
+  const familyTag = list.find((tag) => /^LFF_FAMILY:/i.test(tag)) || "";
+  const category = categoryTag.replace(/^LFF_CATEGORY:/i, "").trim();
+  const family = familyTag.replace(/^LFF_FAMILY:/i, "").trim();
+  const generated = new Set(organizationalTags(category, family).map((tag) => tag.toLocaleLowerCase("es-ES")));
+  const extraTags = list.filter((tag) => !generated.has(tag.toLocaleLowerCase("es-ES")) && !/^LFF_(CATEGORY|FAMILY):/i.test(tag));
+  return { category, family, extraTags };
+}
+
+function stripCoverMarker(value) {
+  const raw = String(value || "");
+  if (!raw.startsWith("LFF_PORTADA::")) return raw;
+  return raw.split("::").slice(3).join("::").trim();
+}
+
 function gqlErrors(payload, key, extraKey = "userErrors") {
   const root = payload?.data?.[key];
   const errors = [...(root?.[extraKey] || []), ...(payload?.errors || [])];
@@ -101,7 +118,7 @@ async function getProductDetail(admin, productId) {
     `#graphql
       query LffProductManagerDetail($id: ID!) {
         product(id: $id) {
-          id title handle status vendor descriptionHtml onlineStoreUrl updatedAt
+          id title handle status vendor descriptionHtml tags onlineStoreUrl updatedAt
           variantsCount { count }
           mediaCount { count }
           options {
@@ -122,6 +139,7 @@ async function getProductDetail(admin, productId) {
   if (payload.errors?.length) throw new Error(payload.errors.map((e) => e.message).join("; "));
   const p = payload.data?.product;
   if (!p) throw new Error("Producto no encontrado.");
+  const taxonomy = taxonomyFromTags(p.tags || []);
   return {
     id: p.id,
     title: p.title,
@@ -129,6 +147,10 @@ async function getProductDetail(admin, productId) {
     status: p.status,
     vendor: p.vendor,
     descriptionHtml: p.descriptionHtml,
+    tags: p.tags || [],
+    category: taxonomy.category,
+    family: taxonomy.family,
+    extraTags: taxonomy.extraTags,
     onlineStoreUrl: p.onlineStoreUrl,
     updatedAt: p.updatedAt,
     variantsCount: p.variantsCount?.count ?? 0,
@@ -206,6 +228,102 @@ async function operationStatus(admin, operationId) {
   const op = payload.data?.productOperation;
   if (!op) throw new Error("Shopify ya no encuentra esa operación.");
   return { id: op.id, status: op.status, product: op.product || null, errors: op.userErrors || [] };
+}
+
+
+async function updateProductDetails(admin, body) {
+  const productId = String(body.productId || "").trim();
+  const title = String(body.title || "").trim();
+  const category = String(body.category || "").trim();
+  const family = String(body.family || "").trim();
+  if (!productId) throw new Error("Falta el producto.");
+  if (title.length < 2) throw new Error("Escribe un nombre válido para el artículo.");
+  if (!category) throw new Error("Selecciona una categoría.");
+  if (!family) throw new Error("Selecciona una familia / universo.");
+  const tags = [...new Set([...organizationalTags(category, family), ...cleanTags(body.tags)])].slice(0, 50);
+  const product = {
+    id: productId,
+    title: title.slice(0, 255),
+    descriptionHtml: String(body.descriptionHtml || "").slice(0, 100000),
+    tags,
+  };
+  const response = await admin.graphql(
+    `#graphql
+      mutation LffUpdateProduct($product: ProductUpdateInput!) {
+        productUpdate(product: $product) {
+          product { id title handle status tags descriptionHtml updatedAt }
+          userErrors { field message }
+        }
+      }`,
+    { variables: { product } },
+  );
+  const payload = await response.json();
+  gqlErrors(payload, "productUpdate");
+  return getProductDetail(admin, productId);
+}
+
+async function setExistingMediaCover(admin, body) {
+  const productId = String(body.productId || "").trim();
+  const mediaId = String(body.mediaId || "").trim();
+  const model = String(body.model || "").trim();
+  const color = String(body.color || "").trim();
+  if (!productId || !mediaId) throw new Error("Selecciona un producto y una imagen.");
+  if (!model || !color) throw new Error("Selecciona Modelo y Color antes de marcar la portada.");
+
+  const product = await getProductDetail(admin, productId);
+  const selected = (product.media || []).find((media) => media.id === mediaId && media.mediaContentType === "IMAGE");
+  if (!selected) throw new Error("La imagen seleccionada no pertenece a este producto.");
+
+  const updates = [];
+  for (const media of product.media || []) {
+    if (media.mediaContentType !== "IMAGE") continue;
+    const wasCover = String(media.alt || "").startsWith("LFF_PORTADA::");
+    if (media.id === mediaId) {
+      const clean = stripCoverMarker(media.alt) || `${product.title} · ${model} · ${color}`;
+      updates.push({ id: media.id, alt: `LFF_PORTADA::${model}::${color}::${clean}`.slice(0, 512) });
+    } else if (wasCover) {
+      updates.push({ id: media.id, alt: stripCoverMarker(media.alt).slice(0, 512) });
+    }
+  }
+  if (!updates.length) throw new Error("No se pudo preparar la portada.");
+
+  // productUpdateMedia sigue disponible en Admin API 2026-07 y solo requiere write_products.
+  // Se usa aquí para evitar pedir un scope write_files adicional únicamente para cambiar alt text.
+  const response = await admin.graphql(
+    `#graphql
+      mutation LffSetProductCover($productId: ID!, $media: [UpdateMediaInput!]!) {
+        productUpdateMedia(productId: $productId, media: $media) {
+          media { id alt status }
+          mediaUserErrors { field message code }
+        }
+      }`,
+    { variables: { productId, media: updates } },
+  );
+  const payload = await response.json();
+  const result = gqlErrors(payload, "productUpdateMedia", "mediaUserErrors");
+  return {
+    cover: (result.media || []).find((media) => media.id === mediaId) || null,
+    product: await getProductDetail(admin, productId),
+  };
+}
+
+async function deleteProduct(admin, productId) {
+  const id = String(productId || "").trim();
+  if (!id) throw new Error("Falta el producto a eliminar.");
+  const response = await admin.graphql(
+    `#graphql
+      mutation LffDeleteProduct($input: ProductDeleteInput!) {
+        productDelete(input: $input) {
+          deletedProductId
+          userErrors { field message }
+        }
+      }`,
+    { variables: { input: { id } } },
+  );
+  const payload = await response.json();
+  const result = gqlErrors(payload, "productDelete");
+  if (!result.deletedProductId) throw new Error("Shopify no confirmó la eliminación del producto.");
+  return { deletedProductId: result.deletedProductId };
 }
 
 async function setProductStatus(admin, productId, status) {
@@ -435,7 +553,7 @@ export const action = async ({ request }) => {
   if (request.method === "OPTIONS") return new Response(null, { headers: corsHeaders(request) });
   try {
     assertAllowedOrigin(request);
-    await requireAdminSession(request);
+    const adminAuth = await requireAdminSession(request);
     const admin = await adminClient();
     const contentType = request.headers.get("content-type") || "";
     if (contentType.includes("multipart/form-data")) {
@@ -451,9 +569,17 @@ export const action = async ({ request }) => {
     if (intent === "operation-status") return json(request, { ok: true, operation: await operationStatus(admin, body.operationId) });
     if (intent === "product-detail") return json(request, { ok: true, product: await getProductDetail(admin, body.productId), template: templateSummary() });
     if (intent === "assign-media") return json(request, { ok: true, ...(await assignMedia(admin, body)) });
+    if (intent === "set-cover") return json(request, { ok: true, ...(await setExistingMediaCover(admin, body)) });
+    if (intent === "update-product") return json(request, { ok: true, product: await updateProductDetails(admin, body) });
     if (intent === "apply-template-prices") return json(request, { ok: true, ...(await applyTemplatePrices(admin, body.productId)) });
     if (intent === "set-status") return json(request, { ok: true, product: await setProductStatus(admin, body.productId, body.status) });
     if (intent === "publish-online-store") return json(request, { ok: true, ...(await publishOnlineStore(admin, body.productId)) });
+    if (intent === "delete-product") {
+      const username = String(adminAuth?.user?.username || "").toLocaleLowerCase("es-ES");
+      const role = String(adminAuth?.user?.role || "").toLocaleLowerCase("es-ES");
+      if (username !== "alejandro" && role !== "owner") throw new Error("Solo Alejandro puede eliminar productos.");
+      return json(request, { ok: true, ...(await deleteProduct(admin, body.productId)) });
+    }
     throw new Error("Acción de producto no reconocida.");
   } catch (error) {
     console.error("[LFF PRODUCT ADMIN]", error);
