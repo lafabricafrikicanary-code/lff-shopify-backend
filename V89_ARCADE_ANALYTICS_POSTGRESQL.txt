@@ -1,0 +1,9 @@
+V89 · Arcade Analytics persistente
+
+- Nueva tabla Prisma ArcadeSession.
+- Nueva migración 20260929222500_arcade_analytics.
+- Nuevo endpoint storefront /apps/lff/arcade/analytics.
+- Registra inicio/fin, juego, duración, resultado, visitante y cliente conectado cuando Shopify lo aporta.
+- Admin /api/lff/admin/auth incorpora intent arcade-analytics-summary (últimas 500 sesiones terminadas).
+- Conserva V88: Alejandro y Gabriel pueden eliminar productos.
+- No modifica mecánicas ni recompensas Arcade.

@@ -319,3 +319,26 @@ model LffFamily {
   @@unique([shop, familyKey])
   @@index([shop, category, sortOrder])
 }
+
+
+model ArcadeSession {
+  id          String   @id @default(cuid())
+  shop        String
+  sessionKey  String
+  game        String
+  customerId  String?
+  visitorId   String?
+  playerLabel String?
+  startedAt   DateTime
+  endedAt     DateTime?
+  seconds     Int?
+  result      String   @default("started")
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@unique([shop, sessionKey])
+  @@index([shop, startedAt])
+  @@index([shop, game, startedAt])
+  @@index([shop, customerId])
+  @@index([shop, visitorId])
+}

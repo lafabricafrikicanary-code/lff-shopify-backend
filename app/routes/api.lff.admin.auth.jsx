@@ -21,6 +21,22 @@ import { recordAudit } from "../lib/lff.server";
 
 const shopDomain = () => process.env.SHOPIFY_SHOP_DOMAIN || "lafabricafriki.myshopify.com";
 
+function arcadeSessionPublic(row) {
+  return {
+    id: row.sessionKey,
+    game: row.game,
+    startedAt: row.startedAt,
+    endedAt: row.endedAt,
+    seconds: row.seconds,
+    result: row.result,
+    player: {
+      customerId: row.customerId || null,
+      visitorId: row.visitorId || null,
+      label: row.playerLabel || "",
+    },
+  };
+}
+
 function adminPublic(user) {
   return {
     id: user.id,
@@ -77,6 +93,19 @@ export const action = async ({ request }) => {
       await heartbeatAdminSession(session, user);
       const fresh = await db.adminUser.findUnique({ where: { id: user.id } });
       return json(request, { ok: true, user: adminPublic(fresh) });
+    }
+
+    if (intent === "arcade-analytics-summary") {
+      const sessions = await db.arcadeSession.findMany({
+        where: { shop, endedAt: { not: null } },
+        orderBy: { endedAt: "desc" },
+        take: 500,
+      });
+      return json(request, {
+        ok: true,
+        sessions: sessions.map(arcadeSessionPublic),
+        limit: 500,
+      });
     }
 
     if (intent === "change-password") {
