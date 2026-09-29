@@ -297,3 +297,25 @@ model ContactRequest {
   status    String   @default("new")
   createdAt DateTime @default(now())
 }
+
+
+model LffFamily {
+  id            String   @id @default(cuid())
+  shop          String
+  familyKey     String
+  category      String
+  name          String
+  sortOrder     Int      @default(999)
+  enabled       Boolean  @default(true)
+  isCustom      Boolean  @default(false)
+  aliasesJson   String?
+  logoFileId    String?
+  logoUrl       String?
+  motionFileId  String?
+  motionUrl     String?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  @@unique([shop, familyKey])
+  @@index([shop, category, sortOrder])
+}

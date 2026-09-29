@@ -1,0 +1,11 @@
+LFF BACKEND V87 · SOLO SUBIR
+
+Archivos relativos a la RAÍZ de la rama v73-postgres:
+- app/routes/api.lff.families.jsx (NUEVO)
+- prisma/schema.prisma (REEMPLAZAR)
+- prisma/migrations/20260929211000_family_manager/migration.sql (NUEVO)
+- render.yaml (REEMPLAZAR)
+- shopify.app.toml (REEMPLAZAR)
+
+Los scopes read_files y write_files ya deben estar concedidos en Shopify y Render.
+Render ejecuta prisma migrate deploy al arrancar, por lo que la tabla LffFamily se crea automáticamente tras desplegar estos cambios.

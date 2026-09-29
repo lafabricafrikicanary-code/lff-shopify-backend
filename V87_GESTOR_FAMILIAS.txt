@@ -1,0 +1,5 @@
+LFF BACKEND V87 · GESTOR DE FAMILIAS
+
+Añade /api/lff/families con persistencia PostgreSQL, orden, alta, desactivación, cambio de categoría y subida de logo/imagen de movimiento a Shopify Files.
+Requiere read_files + write_files concedidos en la app y en SCOPES de Render.
+La migración 20260929211000_family_manager se aplica automáticamente con prisma migrate deploy al arrancar Render.
