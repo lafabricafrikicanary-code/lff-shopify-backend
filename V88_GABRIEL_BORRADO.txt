@@ -1,0 +1,2 @@
+V88 · Gabriel autorizado para eliminar productos junto con Alejandro.
+Subir a la raíz de la rama v73-postgres conservando la ruta app/routes/api.lff.admin.products.jsx.

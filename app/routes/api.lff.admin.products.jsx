@@ -577,7 +577,8 @@ export const action = async ({ request }) => {
     if (intent === "delete-product") {
       const username = String(adminAuth?.user?.username || "").toLocaleLowerCase("es-ES");
       const role = String(adminAuth?.user?.role || "").toLocaleLowerCase("es-ES");
-      if (username !== "alejandro" && role !== "owner") throw new Error("Solo Alejandro puede eliminar productos.");
+      const canDelete = username === "alejandro" || username === "gabriel" || role === "owner";
+      if (!canDelete) throw new Error("Solo Alejandro o Gabriel pueden eliminar productos.");
       return json(request, { ok: true, ...(await deleteProduct(admin, body.productId)) });
     }
     throw new Error("Acción de producto no reconocida.");
