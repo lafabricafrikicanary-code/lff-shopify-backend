@@ -2,7 +2,7 @@ import db from "../db.server";
 import { requireB2BSession } from "../lib/api-auth.server";
 import { assertAllowedOrigin, bodyData, corsHeaders, json } from "../lib/public-api.server";
 import { recordAudit } from "../lib/lff.server";
-import { cleanText, shopDomain } from "../lib/lff-v90.server";
+import { cleanText } from "../lib/lff-v90.server";
 
 function publicThread(thread) {
   return {
