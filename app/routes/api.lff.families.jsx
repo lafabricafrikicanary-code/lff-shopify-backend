@@ -3,27 +3,25 @@ import { unauthenticated } from "../shopify.server";
 import { requireAdminSession } from "../lib/api-auth.server";
 import { assertAllowedOrigin, bodyData, corsHeaders, json } from "../lib/public-api.server";
 import { recordAudit } from "../lib/lff.server";
+import {
+  ensureCategory,
+  listCategories,
+  normalizeCategoryState,
+  slugKey,
+  syncFamilyProductsToCreator,
+} from "../lib/lff-v91.server";
 
 const shopDomain = () => process.env.SHOPIFY_SHOP_DOMAIN || "lafabricafriki.myshopify.com";
-const CATEGORIES = new Set(["Anime & Manga", "Gaming", "Disney", "Multiusos"]);
 const IMAGE_TYPES = new Set(["image/jpeg", "image/png", "image/webp", "image/gif", "image/avif"]);
 const MAX_IMAGE_BYTES = 20 * 1024 * 1024;
 
 function slug(value) {
-  return String(value || "")
-    .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "")
-    .toLowerCase()
-    .replace(/×/g, "x")
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/^-+|-+$/g, "")
-    .slice(0, 80);
+  return slugKey(value);
 }
 
-function cleanCategory(value) {
-  const raw = String(value || "").trim();
-  if (!CATEGORIES.has(raw)) throw new Error("Categoría de familia no válida.");
-  return raw;
+async function cleanCategory(value) {
+  const row = await ensureCategory(shopDomain(), value);
+  return row.name;
 }
 
 function cleanAliases(value) {
@@ -49,6 +47,8 @@ function familyPublic(row) {
     logoUrl: row.logoUrl || "",
     motionFileId: row.motionFileId || "",
     motionUrl: row.motionUrl || "",
+    creatorId: row.creatorId || "",
+    creator: row.creator ? { id: row.creator.id, name: row.creator.name, brandName: row.creator.brandName || "", kind: row.creator.kind || "commercial", status: row.creator.status } : null,
     updatedAt: row.updatedAt,
   };
 }
@@ -56,6 +56,7 @@ function familyPublic(row) {
 async function listFamilies() {
   const rows = await db.lffFamily.findMany({
     where: { shop: shopDomain() },
+    include: { creator: { select: { id: true, name: true, brandName: true, kind: true, status: true } } },
     orderBy: [{ category: "asc" }, { sortOrder: "asc" }, { name: "asc" }],
   });
   return rows.map(familyPublic);
@@ -64,7 +65,7 @@ async function listFamilies() {
 async function saveFamily(body, actor = "Admin") {
   const name = String(body.name || "").trim();
   if (name.length < 2) throw new Error("Escribe el nombre de la familia.");
-  const category = cleanCategory(body.category);
+  const category = await cleanCategory(body.category);
   const familyKey = slug(body.familyKey || name);
   if (!familyKey) throw new Error("No se pudo generar el identificador de la familia.");
   const sortOrder = Math.max(1, Math.min(9999, Number(body.order || 999) || 999));
@@ -72,6 +73,11 @@ async function saveFamily(body, actor = "Admin") {
   const isCustom = body.isCustom === true || body.isCustom === "true";
   const aliases = cleanAliases(body.aliases);
   const shop = shopDomain();
+  const creatorId = String(body.creatorId || "").trim() || null;
+  if (creatorId) {
+    const creator = await db.commercialUser.findFirst({ where: { id: creatorId, shop, kind: "creator", status: { not: "disabled" } } });
+    if (!creator) throw new Error("El YouTuber seleccionado no existe o no está disponible.");
+  }
   const row = await db.lffFamily.upsert({
     where: { shop_familyKey: { shop, familyKey } },
     update: {
@@ -81,6 +87,7 @@ async function saveFamily(body, actor = "Admin") {
       enabled,
       isCustom,
       aliasesJson: JSON.stringify(aliases),
+      creatorId,
     },
     create: {
       shop,
@@ -91,7 +98,9 @@ async function saveFamily(body, actor = "Admin") {
       enabled,
       isCustom,
       aliasesJson: JSON.stringify(aliases),
+      creatorId,
     },
+    include: { creator: { select: { id: true, name: true, brandName: true, kind: true, status: true } } },
   });
   await recordAudit(shop, "family.saved", {
     actor,
@@ -102,6 +111,7 @@ async function saveFamily(body, actor = "Admin") {
     name,
     sortOrder,
     enabled,
+    creatorId,
   }).catch(() => {});
   return familyPublic(row);
 }
@@ -112,7 +122,7 @@ async function disableFamily(body, actor = "Admin") {
   const shop = shopDomain();
   const existing = await db.lffFamily.findUnique({ where: { shop_familyKey: { shop, familyKey } } });
   const name = String(body.name || existing?.name || familyKey).trim();
-  const category = cleanCategory(body.category || existing?.category || "Multiusos");
+  const category = await cleanCategory(body.category || existing?.category || "Multiusos");
   const sortOrder = Math.max(1, Math.min(9999, Number(body.order || existing?.sortOrder || 999) || 999));
   const row = await db.lffFamily.upsert({
     where: { shop_familyKey: { shop, familyKey } },
@@ -136,7 +146,11 @@ async function batchOrder(body, actor = "Admin") {
   const items = Array.isArray(body.items) ? body.items : [];
   if (!items.length) throw new Error("No hay familias para reordenar.");
   const shop = shopDomain();
-  await db.$transaction(items.slice(0, 250).map((item) => {
+  const prepared = [];
+  for (const item of items.slice(0, 250)) {
+    prepared.push({ ...item, cleanCategory: await cleanCategory(item.category) });
+  }
+  await db.$transaction(prepared.map((item) => {
     const familyKey = slug(item.familyKey);
     const order = Math.max(1, Math.min(9999, Number(item.order || 999) || 999));
     return db.lffFamily.upsert({
@@ -145,7 +159,7 @@ async function batchOrder(body, actor = "Admin") {
       create: {
         shop,
         familyKey,
-        category: cleanCategory(item.category),
+        category: item.cleanCategory,
         name: String(item.name || familyKey).slice(0, 180),
         sortOrder: order,
         enabled: true,
@@ -241,7 +255,7 @@ async function uploadShopImage(admin, file, alt) {
 
 async function uploadFamilyFile(admin, formData, actor = "Admin") {
   const name = String(formData.get("name") || "").trim();
-  const category = cleanCategory(formData.get("category"));
+  const category = await cleanCategory(formData.get("category"));
   const familyKey = slug(formData.get("familyKey") || name);
   const kind = String(formData.get("kind") || "logo");
   if (!new Set(["logo", "motion"]).has(kind)) throw new Error("Tipo de imagen no válido.");
@@ -255,6 +269,7 @@ async function uploadFamilyFile(admin, formData, actor = "Admin") {
     aliases: formData.get("aliases") || "",
     isCustom: formData.get("isCustom") === "true",
     enabled: formData.get("enabled") !== "false",
+    creatorId: formData.get("creatorId") || "",
   }, actor);
   const uploaded = await uploadShopImage(admin, file, `${name} · ${kind === "logo" ? "logo" : "imagen movimiento"} · La Fábrica Friki`);
   const shop = shopDomain();
@@ -284,7 +299,8 @@ function publicJson(data, init = {}) {
 export const loader = async ({ request }) => {
   if (request.method === "OPTIONS") return new Response(null, { headers: corsHeaders(request) });
   try {
-    return publicJson({ ok: true, families: await listFamilies() });
+    const shop = shopDomain();
+    return publicJson({ ok: true, families: await listFamilies(), categories: (await listCategories(shop)).map((c) => ({ id: c.id, key: c.categoryKey, name: c.name, order: c.sortOrder, state: c.state, isCustom: c.isCustom })) });
   } catch (error) {
     console.error("[LFF FAMILIES PUBLIC]", error);
     return publicJson({ ok: false, error: error.message }, { status: 500 });
@@ -309,11 +325,39 @@ export const action = async ({ request }) => {
     }
     const body = await bodyData(request);
     const intent = String(body.intent || "");
-    if (intent === "list") return json(request, { ok: true, families: await listFamilies() });
-    if (intent === "save") return json(request, { ok: true, family: await saveFamily(body, actor), families: await listFamilies() });
-    if (intent === "disable") return json(request, { ok: true, family: await disableFamily(body, actor), families: await listFamilies() });
-    if (intent === "reorder") return json(request, { ok: true, families: await batchOrder(body, actor) });
-    throw new Error("Acción de familias no reconocida.");
+    const shop = shopDomain();
+    const categoriesPayload = async () => (await listCategories(shop)).map((c) => ({ id: c.id, key: c.categoryKey, name: c.name, order: c.sortOrder, state: c.state, isCustom: c.isCustom }));
+    if (intent === "list") return json(request, { ok: true, families: await listFamilies(), categories: await categoriesPayload(), creators: (await db.commercialUser.findMany({ where: { shop, kind: "creator" }, orderBy: { name: "asc" } })).map((c) => ({ id: c.id, name: c.name, brandName: c.brandName || c.name, status: c.status, captureCode: c.captureCode })) });
+    if (intent === "save") {
+      const family = await saveFamily(body, actor);
+      const admin = await adminClient();
+      const sync = await syncFamilyProductsToCreator(admin, shop, family).catch((error) => ({ error: error.message, scanned: 0, linked: 0 }));
+      return json(request, { ok: true, family, sync, families: await listFamilies(), categories: await categoriesPayload() });
+    }
+    if (intent === "disable") return json(request, { ok: true, family: await disableFamily(body, actor), families: await listFamilies(), categories: await categoriesPayload() });
+    if (intent === "reorder") return json(request, { ok: true, families: await batchOrder(body, actor), categories: await categoriesPayload() });
+    if (intent === "category-save") {
+      const name = String(body.name || "").trim();
+      if (name.length < 2) throw new Error("Escribe un nombre de categoría válido.");
+      const categoryKey = slug(body.key || name);
+      const state = normalizeCategoryState(body.state || "preparation");
+      const sortOrder = Math.max(1, Math.min(9999, Number(body.order || 999) || 999));
+      const existing = await db.lffCategory.findFirst({ where: { shop, OR: [{ categoryKey }, { name: { equals: name, mode: "insensitive" } }] } });
+      const category = existing
+        ? await db.lffCategory.update({ where: { id: existing.id }, data: { name: name.slice(0, 100), sortOrder, state } })
+        : await db.lffCategory.create({ data: { shop, categoryKey, name: name.slice(0, 100), sortOrder, state, isCustom: true } });
+      await recordAudit(shop, "category.saved", { actor, targetType: "category", targetId: category.id, name: category.name, state });
+      return json(request, { ok: true, category: { id: category.id, key: category.categoryKey, name: category.name, order: category.sortOrder, state: category.state, isCustom: category.isCustom }, categories: await categoriesPayload() });
+    }
+    if (intent === "category-state") {
+      const category = await db.lffCategory.findFirst({ where: { shop, OR: [{ id: String(body.categoryId || "") }, { categoryKey: slug(body.key || body.name) }] } });
+      if (!category) throw new Error("No se encontró la categoría.");
+      const state = normalizeCategoryState(body.state);
+      const updated = await db.lffCategory.update({ where: { id: category.id }, data: { state } });
+      await recordAudit(shop, "category.state_changed", { actor, targetType: "category", targetId: category.id, state });
+      return json(request, { ok: true, category: { id: updated.id, key: updated.categoryKey, name: updated.name, order: updated.sortOrder, state: updated.state, isCustom: updated.isCustom }, categories: await categoriesPayload() });
+    }
+    throw new Error("Acción de familias/categorías no reconocida.");
   } catch (error) {
     console.error("[LFF FAMILY ADMIN]", error);
     const status = /sesión|autoriz/i.test(error.message) ? 401 : 400;

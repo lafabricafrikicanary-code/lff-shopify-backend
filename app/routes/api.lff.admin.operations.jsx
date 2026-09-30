@@ -16,6 +16,7 @@ import {
   releaseMatureCommissions,
   shopDomain,
 } from "../lib/lff-v90.server";
+import { createCreatorWithPromoCode, creatorPublic, ensureCommercialDirectThread } from "../lib/lff-v91.server";
 
 async function adminClient() {
   const { admin } = await unauthenticated.admin(shopDomain());
@@ -79,8 +80,14 @@ function commercialPublic(row) {
     phone: row.phone,
     channel: row.channel,
     about: row.about,
+    kind: row.kind || "commercial",
+    brandName: row.brandName || "",
+    promoPercent: Number(row.promoPercent || 0),
+    firstSaleRateBps: Number(row.firstSaleRateBps || 0),
+    referralRateBps: Number(row.referralRateBps || 0),
+    ownProductRateBps: Number(row.ownProductRateBps || 0),
     captureCode: row.captureCode,
-    personalCode: row.personalCode,
+    personalCode: row.kind === "creator" ? "" : row.personalCode,
     status: row.status,
     forceChange: row.forceChange,
     lastLoginAt: row.lastLoginAt,
@@ -110,12 +117,16 @@ function b2bPublic(row) {
 
 async function listCommercialData(shop) {
   await releaseMatureCommissions(shop);
-  const [applications, commercials, payouts, recoveries, attributions] = await Promise.all([
-    db.commercialApplication.findMany({ where: { shop }, orderBy: { createdAt: "desc" }, take: 200 }),
-    db.commercialUser.findMany({ where: { shop }, orderBy: { createdAt: "desc" }, take: 200 }),
-    db.payout.findMany({ where: { shop }, orderBy: { createdAt: "desc" }, take: 200 }),
-    db.accessRecoveryRequest.findMany({ where: { shop, accountType: "commercial" }, orderBy: { createdAt: "desc" }, take: 200 }),
-    db.commercialCustomerAttribution.findMany({ where: { shop }, orderBy: { createdAt: "desc" }, take: 500 }),
+  const [applications, commercials, payouts, recoveries, attributions, commissions, ownPurchases, creatorFamilies, creatorProducts] = await Promise.all([
+    db.commercialApplication.findMany({ where: { shop }, orderBy: { createdAt: "desc" }, take: 300 }),
+    db.commercialUser.findMany({ where: { shop }, orderBy: { createdAt: "desc" }, take: 300 }),
+    db.payout.findMany({ where: { shop }, orderBy: { createdAt: "desc" }, take: 400 }),
+    db.accessRecoveryRequest.findMany({ where: { shop, accountType: "commercial" }, orderBy: { createdAt: "desc" }, take: 300 }),
+    db.commercialCustomerAttribution.findMany({ where: { shop }, orderBy: { updatedAt: "desc" }, take: 800 }),
+    db.commission.findMany({ where: { shop }, orderBy: { createdAt: "desc" }, take: 1000 }),
+    db.commercialOwnPurchase.findMany({ where: { shop }, orderBy: { createdAt: "desc" }, take: 500 }),
+    db.lffFamily.findMany({ where: { shop, creatorId: { not: null } }, orderBy: [{ category: "asc" }, { sortOrder: "asc" }] }),
+    db.creatorProduct.findMany({ where: { shop }, orderBy: { updatedAt: "desc" }, take: 1000 }),
   ]);
   const commissionGroups = await db.commission.groupBy({
     by: ["commercialId", "status"],
@@ -124,11 +135,15 @@ async function listCommercialData(shop) {
     _count: { id: true },
   });
   return {
-    applications: applications.map((x) => ({ id: x.id, name: x.name, email: x.email, phone: x.phone, channel: x.channel, about: x.about, inviterCode: x.inviterCode, status: x.status, createdAt: x.createdAt, decidedAt: x.decidedAt, commercialId: x.commercialId })),
+    applications: applications.map((x) => ({ id: x.id, name: x.name, email: x.email, phone: x.phone, channel: x.channel, about: x.about, kind: x.kind || "commercial", brandName: x.brandName || "", promoPercent: Number(x.promoPercent || 0), inviterCode: x.inviterCode, status: x.status, createdAt: x.createdAt, decidedAt: x.decidedAt, commercialId: x.commercialId })),
     commercials: commercials.map(commercialPublic),
     payouts,
     recoveries,
     attributions,
+    commissions: commissions.map((c) => ({ ...c, details: (() => { try { return JSON.parse(c.detailsJson || "null"); } catch (_) { return null; } })() })),
+    ownPurchases,
+    creatorFamilies: creatorFamilies.map((f) => ({ id: f.id, key: f.familyKey, name: f.name, category: f.category, creatorId: f.creatorId, enabled: f.enabled })),
+    creatorProducts,
     commissionGroups,
   };
 }
@@ -243,6 +258,48 @@ export const loader = async ({ request }) => {
       const campaigns = await db.retentionCampaign.findMany({ where: { shop }, include: { favorite: true }, orderBy: { createdAt: "desc" }, take: 500 });
       return json(request, { ok: true, campaigns });
     }
+    if (view === "traffic-live") {
+      const activeSince = new Date(Date.now() - 90 * 1000);
+      const rows = await db.trafficPresence.findMany({
+        where: { shop, lastSeenAt: { gte: activeSince } },
+        orderBy: { lastSeenAt: "desc" },
+        take: 500,
+      });
+      const sourceMap = {};
+      const countryMap = {};
+      const pageMap = {};
+      for (const row of rows) {
+        sourceMap[row.source || "web"] = (sourceMap[row.source || "web"] || 0) + 1;
+        const countryKey = row.countryCode || row.country || "unknown";
+        countryMap[countryKey] = (countryMap[countryKey] || 0) + 1;
+        const pageKey = row.path || "/";
+        pageMap[pageKey] = (pageMap[pageKey] || 0) + 1;
+      }
+      return json(request, {
+        ok: true,
+        active: rows.length,
+        sources: Object.entries(sourceMap).map(([source, count]) => ({ source, count })),
+        countries: Object.entries(countryMap).map(([country, count]) => ({ country, count })).sort((a, b) => b.count - a.count),
+        pages: Object.entries(pageMap).map(([path, count]) => ({ path, count })).sort((a, b) => b.count - a.count).slice(0, 50),
+        visitors: rows.map((row) => ({
+          visitorId: row.visitorId,
+          customerId: row.customerId,
+          source: row.source,
+          sourceDetail: row.sourceDetail,
+          commercialCode: row.commercialCode,
+          companyId: row.companyId,
+          path: row.path,
+          countryCode: row.countryCode,
+          country: row.country,
+          region: row.region,
+          city: row.city,
+          latitude: row.latitude,
+          longitude: row.longitude,
+          firstSeenAt: row.firstSeenAt,
+          lastSeenAt: row.lastSeenAt,
+        })),
+      });
+    }
     if (view === "traffic") {
       const days = Math.max(1, Math.min(Number(url.searchParams.get("days") || 30), 365));
       const from = new Date(Date.now() - days * 24 * 60 * 60 * 1000);
@@ -264,6 +321,33 @@ export const loader = async ({ request }) => {
       const messages = await db.outboundMessage.findMany({ where: { shop }, orderBy: { createdAt: "desc" }, take: 500 });
       return json(request, { ok: true, messages });
     }
+    if (view === "subscriptions") {
+      const [club, boxes] = await Promise.all([
+        db.clubProfile.findMany({ where: { shop }, include: { customer: true }, orderBy: { joinedAt: "desc" }, take: 1000 }),
+        db.boxSubscription.findMany({ where: { shop }, include: { customer: true, vouchers: { orderBy: { createdAt: "desc" }, take: 50 } }, orderBy: { createdAt: "desc" }, take: 1000 }),
+      ]);
+      return json(request, {
+        ok: true,
+        counts: { club: club.length, boxes: boxes.length, activeBoxes: boxes.filter((x) => x.status === "active").length },
+        club,
+        boxes,
+      });
+    }
+    if (view === "commercial-chats") {
+      const accounts = await db.commercialUser.findMany({ where: { shop }, orderBy: { createdAt: "desc" }, take: 500 });
+      const threads = await db.chatThread.findMany({
+        where: { shop, ownerType: "commercial" },
+        include: { messages: { orderBy: { createdAt: "asc" }, take: 500 } },
+        orderBy: { updatedAt: "desc" },
+        take: 500,
+      });
+      const accountMap = new Map(accounts.map((x) => [x.id, x]));
+      return json(request, { ok: true, threads: threads.map((t) => {
+        const account = accountMap.get(t.ownerId || "");
+        return { ...t, account: account ? creatorPublic(account) : null };
+      }) });
+    }
+
     if (view === "contacts") {
       const contacts = await db.contactRequest.findMany({ where: { shop }, orderBy: { createdAt: "desc" }, take: 500 });
       return json(request, { ok: true, contacts });
@@ -403,14 +487,44 @@ export const action = async ({ request }) => {
     if (intent === "commercial-approve") {
       ownerOnly(auth);
       const application = await db.commercialApplication.findFirst({ where: { id: String(body.applicationId), shop } });
-      if (!application || application.status !== "pending") throw new Error("Solicitud comercial no disponible.");
-      const commercial = await createCommercialWithCodes({
-        admin: await adminClient(), shop, name: application.name, email: application.email, phone: application.phone, channel: application.channel, about: application.about,
-        passwordHash: application.passwordHash, passwordSalt: application.passwordSalt,
-      });
+      if (!application || application.status !== "pending") throw new Error("Solicitud no disponible.");
+      const admin = await adminClient();
+      const commercial = application.kind === "creator"
+        ? await createCreatorWithPromoCode({
+            admin, shop, name: application.name, email: application.email, phone: application.phone, channel: application.channel, about: application.about,
+            brandName: application.brandName || application.name, promoPercent: Math.max(1, Math.min(50, Number(body.promoPercent || application.promoPercent || 10) || 10)),
+            passwordHash: application.passwordHash, passwordSalt: application.passwordSalt,
+          })
+        : await createCommercialWithCodes({
+            admin, shop, name: application.name, email: application.email, phone: application.phone, channel: application.channel, about: application.about,
+            passwordHash: application.passwordHash, passwordSalt: application.passwordSalt,
+          });
       await db.commercialApplication.update({ where: { id: application.id }, data: { status: "approved", commercialId: commercial.id, decidedAt: new Date() } });
-      await recordAudit(shop, "commercial.application_approved", { actor: who, targetType: "commercial_application", targetId: application.id, commercialId: commercial.id });
+      await ensureCommercialDirectThread(commercial).catch(() => null);
+      await recordAudit(shop, application.kind === "creator" ? "creator.application_approved" : "commercial.application_approved", { actor: who, targetType: "commercial_application", targetId: application.id, commercialId: commercial.id, kind: application.kind || "commercial" });
       return json(request, { ok: true, commercial: commercialPublic(commercial), ...(await listCommercialData(shop)) });
+    }
+
+    if (intent === "creator-create") {
+      ownerOnly(auth);
+      const name = cleanText(body.name, 180);
+      const email = cleanText(body.email, 320).toLowerCase();
+      const brandName = cleanText(body.brandName || name, 100);
+      const password = String(body.password || "");
+      if (!name || !email || !brandName) throw new Error("Completa nombre, correo y marca/canal.");
+      if (password.length < 8) throw new Error("La contraseña temporal debe tener al menos 8 caracteres.");
+      const exists = await db.commercialUser.findFirst({ where: { shop, email: { equals: email, mode: "insensitive" } } });
+      if (exists) throw new Error("Ya existe una cuenta con ese correo.");
+      const rec = hashPassword(password);
+      const creator = await createCreatorWithPromoCode({
+        admin: await adminClient(), shop, name, email, phone: cleanText(body.phone, 80) || null,
+        channel: cleanText(body.channel, 500) || null, about: cleanText(body.about, 2000) || null,
+        brandName, promoPercent: body.promoPercent || 10, passwordHash: rec.hash, passwordSalt: rec.salt,
+      });
+      const refreshedCreator = await db.commercialUser.update({ where: { id: creator.id }, data: { forceChange: true } });
+      await ensureCommercialDirectThread(refreshedCreator).catch(() => null);
+      await recordAudit(shop, "creator.admin_created", { actor: who, targetType: "creator", targetId: creator.id, brandName, captureCode: creator.captureCode });
+      return json(request, { ok: true, creator: creatorPublic(refreshedCreator), ...(await listCommercialData(shop)) });
     }
 
     if (intent === "commercial-reject") {
@@ -418,7 +532,7 @@ export const action = async ({ request }) => {
       const row = await db.commercialApplication.findFirst({ where: { id: String(body.applicationId), shop } });
       if (!row) throw new Error("No se encontró la solicitud.");
       await db.commercialApplication.update({ where: { id: row.id }, data: { status: "rejected", decidedAt: new Date() } });
-      await recordAudit(shop, "commercial.application_rejected", { actor: who, targetType: "commercial_application", targetId: row.id });
+      await recordAudit(shop, row.kind === "creator" ? "creator.application_rejected" : "commercial.application_rejected", { actor: who, targetType: "commercial_application", targetId: row.id, kind: row.kind || "commercial" });
       return json(request, { ok: true, ...(await listCommercialData(shop)) });
     }
 
@@ -472,6 +586,18 @@ export const action = async ({ request }) => {
       await db.commission.updateMany({ where: { id: { in: commissions.map((c) => c.id) } }, data: { status: "paid", payoutId: payout.id } });
       await recordAudit(shop, "commercial.payout_paid", { actor: who, targetType: "payout", targetId: payout.id, commercialId: body.commercialId, totalCents, commissionIds: commissions.map((c) => c.id) });
       return json(request, { ok: true, payout, ...(await listCommercialData(shop)) });
+    }
+
+    if (intent === "commercial-chat-send") {
+      const account = await db.commercialUser.findFirst({ where: { id: String(body.commercialId || body.accountId || ""), shop } });
+      if (!account) throw new Error("No se encontró la cuenta comercial/YouTuber.");
+      const thread = await ensureCommercialDirectThread(account);
+      const message = cleanText(body.message, 3000);
+      if (!message) throw new Error("Escribe un mensaje.");
+      const created = await db.chatMessage.create({ data: { threadId: thread.id, author: `${who} · Administración`, body: message } });
+      await db.chatThread.update({ where: { id: thread.id }, data: { updatedAt: new Date() } });
+      await recordAudit(shop, "commercial.admin_chat_message", { actor: who, targetType: "chat_thread", targetId: thread.id, commercialId: account.id, kind: account.kind || "commercial", messageId: created.id });
+      return json(request, { ok: true, threadId: thread.id, message: created });
     }
 
     if (intent === "b2b-approve") {
@@ -611,9 +737,9 @@ export const action = async ({ request }) => {
       return json(request, { ok: true });
     }
 
-    throw new Error("Acción administrativa V90 no reconocida.");
+    throw new Error("Acción administrativa V91 no reconocida.");
   } catch (error) {
-    console.error("[LFF ADMIN V90]", error);
+    console.error("[LFF ADMIN V91]", error);
     const status = /sesión|autoriz|Solo Alejandro/i.test(error.message) ? 401 : 400;
     return json(request, { ok: false, error: error.message }, { status });
   }

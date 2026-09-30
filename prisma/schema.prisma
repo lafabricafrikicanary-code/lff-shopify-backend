@@ -41,6 +41,12 @@ model CommercialUser {
   phone                     String?
   channel                   String?
   about                     String?
+  kind                      String    @default("commercial")
+  brandName                 String?
+  promoPercent              Int       @default(15)
+  firstSaleRateBps          Int       @default(3000)
+  referralRateBps           Int       @default(1000)
+  ownProductRateBps         Int       @default(0)
   captureCode               String    @unique
   personalCode              String    @unique
   status                    String    @default("active")
@@ -56,9 +62,12 @@ model CommercialUser {
   createdAt                 DateTime  @default(now())
   updatedAt                 DateTime  @updatedAt
 
-  attributions CommercialCustomerAttribution[]
-  commissions  Commission[]
-  sessions     CommercialSession[]
+  attributions    CommercialCustomerAttribution[]
+  commissions     Commission[]
+  sessions        CommercialSession[]
+  creatorFamilies LffFamily[] @relation("CreatorFamilies")
+  creatorProducts CreatorProduct[]
+  ownPurchases    CommercialOwnPurchase[]
 }
 
 model CommercialApplication {
@@ -69,6 +78,9 @@ model CommercialApplication {
   phone         String?
   channel       String?
   about         String?
+  kind          String    @default("commercial")
+  brandName     String?
+  promoPercent  Int       @default(15)
   inviterCode   String?
   passwordHash  String
   passwordSalt  String
@@ -160,6 +172,8 @@ model Commission {
   basisCents     Int
   rateBps        Int
   amountCents    Int
+  commissionType String    @default("commercial")
+  detailsJson    String?
   status         String    @default("pending_validation")
   validationDate DateTime?
   payoutId       String?
@@ -365,13 +379,99 @@ model LffFamily {
   logoUrl       String?
   motionFileId  String?
   motionUrl     String?
+  creatorId     String?
   createdAt     DateTime @default(now())
   updatedAt     DateTime @updatedAt
 
+  creator CommercialUser? @relation("CreatorFamilies", fields: [creatorId], references: [id], onDelete: SetNull)
+
   @@unique([shop, familyKey])
   @@index([shop, category, sortOrder])
+  @@index([shop, creatorId])
 }
 
+
+
+model LffCategory {
+  id        String   @id @default(cuid())
+  shop      String
+  categoryKey String
+  name      String
+  sortOrder Int      @default(999)
+  state     String   @default("published")
+  isCustom  Boolean  @default(false)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([shop, categoryKey])
+  @@unique([shop, name])
+  @@index([shop, state, sortOrder])
+}
+
+model CreatorProduct {
+  id          String   @id @default(cuid())
+  shop        String
+  creatorId   String
+  productGid  String
+  productHandle String?
+  familyKey   String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  creator CommercialUser @relation(fields: [creatorId], references: [id], onDelete: Cascade)
+
+  @@unique([shop, productGid])
+  @@index([shop, creatorId])
+  @@index([shop, familyKey])
+}
+
+model CommercialOwnPurchase {
+  id           String   @id @default(cuid())
+  shop         String
+  commercialId String
+  orderGid     String
+  orderName    String?
+  totalCents   Int      @default(0)
+  currency     String?
+  code         String
+  paidAt       DateTime?
+  createdAt    DateTime @default(now())
+
+  commercial CommercialUser @relation(fields: [commercialId], references: [id], onDelete: Cascade)
+
+  @@unique([shop, orderGid, commercialId])
+  @@index([shop, commercialId, createdAt])
+}
+
+model TrafficPresence {
+  id             String   @id @default(cuid())
+  shop           String
+  visitorId      String
+  sessionKey     String?
+  customerId     String?
+  source         String   @default("web")
+  sourceDetail   String?
+  commercialCode String?
+  companyId      String?
+  path           String?
+  referrer       String?
+  ipHash         String?
+  countryCode    String?
+  country        String?
+  region         String?
+  city           String?
+  latitude       Float?
+  longitude      Float?
+  userAgent      String?
+  firstSeenAt    DateTime @default(now())
+  lastSeenAt     DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  @@unique([shop, visitorId])
+  @@index([shop, lastSeenAt])
+  @@index([shop, source, lastSeenAt])
+  @@index([shop, ipHash])
+}
 
 model ArcadeSession {
   id          String   @id @default(cuid())
@@ -462,6 +562,7 @@ model BoxSubscription {
   address                String?
   postal                 String?
   city                   String?
+  country                String?
   status                 String          @default("pending_payment")
   monthlyPriceCents      Int             @default(1500)
   monthlyVoucherCents    Int             @default(1500)

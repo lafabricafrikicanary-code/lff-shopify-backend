@@ -40,6 +40,7 @@ function publicCustomer(customer) {
       address: latestBox.address,
       postal: latestBox.postal,
       city: latestBox.city,
+      country: latestBox.country,
       vouchers: (latestBox.vouchers || []).map((v) => ({ code: v.code, amountCents: v.amountCents, status: v.status, expiresAt: v.expiresAt })),
     } : null,
   };
@@ -203,6 +204,7 @@ export const action = async ({ request }) => {
         address: cleanText(body.address, 220) || null,
         postal: cleanText(body.postal, 20) || null,
         city: cleanText(body.city, 100) || null,
+        country: cleanText(body.country, 100) || null,
       };
       const subscription = existing
         ? await db.boxSubscription.update({ where: { id: existing.id }, data })

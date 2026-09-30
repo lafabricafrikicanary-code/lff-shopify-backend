@@ -1,6 +1,7 @@
 import db from "../db.server";
 import { authenticate } from "../shopify.server";
 import { classifyTrafficSource, cleanText } from "../lib/lff-v90.server";
+import { upsertTrafficPresence } from "../lib/lff-v91.server";
 
 async function bodyData(request) {
   const contentType = request.headers.get("content-type") || "";
@@ -20,6 +21,8 @@ export const action = async ({ request }) => {
     }
     const source = classifyTrafficSource(body);
     const event = cleanText(body.event || "page_view", 80) || "page_view";
+    await upsertTrafficPresence(request, shop, body, source).catch((error) => console.warn("[LFF TRAFFIC PRESENCE]", error.message));
+    if (event === "heartbeat") return Response.json({ ok: true, heartbeat: true, source });
     const metadata = body.metadata && typeof body.metadata === "object" ? body.metadata : null;
     const row = await db.trafficEvent.create({
       data: {

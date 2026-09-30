@@ -26,8 +26,14 @@ function publicCommercial(commercial) {
     email: commercial.email,
     phone: commercial.phone,
     channel: commercial.channel,
+    kind: commercial.kind || "commercial",
+    brandName: commercial.brandName || "",
+    promoPercent: Number(commercial.promoPercent || 0),
+    firstSaleRateBps: Number(commercial.firstSaleRateBps || 0),
+    referralRateBps: Number(commercial.referralRateBps || 0),
+    ownProductRateBps: Number(commercial.ownProductRateBps || 0),
     captureCode: commercial.captureCode,
-    personalCode: commercial.personalCode,
+    personalCode: commercial.kind === "creator" ? "" : commercial.personalCode,
     status: commercial.status,
     forceChange: commercial.forceChange,
   };
@@ -58,9 +64,13 @@ export const action = async ({ request }) => {
       const phone = String(body.phone || "").trim();
       const channel = String(body.channel || "").trim();
       const about = String(body.about || "").trim();
+      const kind = String(body.kind || "commercial").trim().toLowerCase() === "creator" ? "creator" : "commercial";
+      const brandName = kind === "creator" ? String(body.brandName || name || "").trim() : "";
+      const promoPercent = kind === "creator" ? 10 : 15;
       const inviterCode = String(body.inviterCode || "").trim().toUpperCase();
       const password = String(body.password || "");
       if (!name || !email || !phone) throw new Error("Completa nombre, correo y teléfono.");
+      if (kind === "creator" && !brandName) throw new Error("Escribe el nombre de la marca/canal del YouTuber.");
       if (password.length < 8) throw new Error("La contraseña debe tener al menos 8 caracteres.");
       const existingCommercial = await db.commercialUser.findFirst({ where: { shop, email: { equals: email, mode: "insensitive" } } });
       if (existingCommercial) throw new Error("Ya existe una cuenta comercial con ese correo.");
@@ -74,6 +84,9 @@ export const action = async ({ request }) => {
         phone,
         channel: channel || null,
         about: about || null,
+        kind,
+        brandName: brandName || null,
+        promoPercent,
         inviterCode: inviterCode || null,
         passwordHash: record.hash,
         passwordSalt: record.salt,
@@ -84,7 +97,7 @@ export const action = async ({ request }) => {
       const application = existingApplication
         ? await db.commercialApplication.update({ where: { id: existingApplication.id }, data })
         : await db.commercialApplication.create({ data });
-      await recordAudit(shop, "commercial.application_created", { targetType: "commercial_application", targetId: application.id, actor: email });
+      await recordAudit(shop, kind === "creator" ? "creator.application_created" : "commercial.application_created", { targetType: "commercial_application", targetId: application.id, actor: email, kind, brandName, promoPercent });
       return json(request, { ok: true, status: "pending" });
     }
 
@@ -114,7 +127,7 @@ export const action = async ({ request }) => {
         return json(request, { ok: false, error: "Usuario o contraseña incorrectos." }, { status: 401 });
       }
       assertNotLocked(commercial);
-      if (commercial.status !== "active") return json(request, { ok: false, error: "Esta cuenta comercial no está activa." }, { status: 403 });
+      if (commercial.status !== "active") return json(request, { ok: false, error: "Esta cuenta no está activa." }, { status: 403 });
       if (!verifyPassword(body.password, commercial.passwordSalt, commercial.passwordHash)) {
         await noteFailedCommercialLogin(commercial);
         return json(request, { ok: false, error: "Usuario o contraseña incorrectos." }, { status: 401 });

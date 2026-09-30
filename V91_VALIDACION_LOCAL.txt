@@ -1,0 +1,17 @@
+LA FÁBRICA FRIKI — V91 VALIDACIÓN LOCAL
+Fecha: 30/09/2026
+
+Comprobaciones realizadas antes de empaquetar:
+- Base de trabajo: V90.1 completo corregido.
+- Sintaxis JS comprobada con node --check en todos los JS/JSX nuevos/modificados de V91 (copiando JSX temporalmente a .js para el parser Node): OK.
+- Imports relativos de módulos *.server revisados: no quedan imports V91 sin usar en las rutas modificadas.
+- prisma/schema.prisma: llaves balanceadas, modelos sin duplicados y modelos V91 esperados presentes: OK.
+- Migración V91 comprobada contra los nuevos campos/tablas del schema: OK.
+- Todas las migraciones previas V90.1 se conservan: OK.
+- Integridad de los ZIP se comprueba tras su creación.
+
+Limitación de esta validación local:
+- No se ejecutó un build completo npm/react-router dentro del contenedor de generación porque la instalación local de dependencias no terminó dentro de la ventana de ejecución disponible.
+- Por ello, el build definitivo y prisma migrate deploy deben considerarse validados solamente cuando Render complete el despliegue en verde.
+
+Estado: GENERADO / VALIDADO ESTÁTICAMENTE. NO DESPLEGADO TODAVÍA.

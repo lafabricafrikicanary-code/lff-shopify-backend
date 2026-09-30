@@ -7,6 +7,7 @@ import {
   json,
 } from "../lib/public-api.server";
 import { recordAudit } from "../lib/lff.server";
+import { syncCreatorProductLink } from "../lib/lff-v91.server";
 import {
   buildLffProductTemplate,
   templateSummary,
@@ -575,7 +576,14 @@ export const action = async ({ request }) => {
       await recordAudit(shop, "product.created", { actor, targetType: "product", targetId: result.product?.id || result.operationId || "pending", title: body.title, category: body.category, family: body.family }).catch(() => {});
       return json(request, { ok: true, ...result, template: templateSummary() });
     }
-    if (intent === "operation-status") return json(request, { ok: true, operation: await operationStatus(admin, body.operationId) });
+    if (intent === "operation-status") {
+      const operation = await operationStatus(admin, body.operationId);
+      if (operation.status === "COMPLETE" && operation.product?.id) {
+        const detail = await getProductDetail(admin, operation.product.id).catch(() => null);
+        if (detail) await syncCreatorProductLink(shop, detail.id, detail.handle, detail.family).catch(() => {});
+      }
+      return json(request, { ok: true, operation });
+    }
     if (intent === "product-detail") return json(request, { ok: true, product: await getProductDetail(admin, body.productId), template: templateSummary() });
     if (intent === "assign-media") {
       const result = await assignMedia(admin, body);
@@ -589,6 +597,7 @@ export const action = async ({ request }) => {
     }
     if (intent === "update-product") {
       const product = await updateProductDetails(admin, body);
+      await syncCreatorProductLink(shop, product.id, product.handle, product.family).catch(() => {});
       await recordAudit(shop, "product.updated", { actor, targetType: "product", targetId: body.productId, title: body.title, category: body.category, family: body.family }).catch(() => {});
       return json(request, { ok: true, product });
     }
