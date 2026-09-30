@@ -30,6 +30,7 @@ export const action = async ({ request }) => {
   const customerId = url.searchParams.get("logged_in_customer_id");
   const body = await bodyData(request);
   const message = String(body.message || "").trim();
+  const threadId = body.threadId ? String(body.threadId) : null;
 
   if (!shop) {
     return Response.json({ ok: false, error: "Shop ausente." }, { status: 400 });
@@ -39,6 +40,7 @@ export const action = async ({ request }) => {
     shop,
     customerId,
     message,
+    threadId,
   });
 
   return Response.json({

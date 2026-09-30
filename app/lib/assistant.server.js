@@ -69,7 +69,7 @@ function classifyOpenAIError(error) {
   return "api_error";
 }
 
-export async function answerStoreAssistant({ shop, message, customerId = null }) {
+export async function answerStoreAssistant({ shop, message, customerId = null, threadId = null }) {
   const text = String(message || "").trim().slice(0, 1200);
   if (!text) {
     return {
@@ -80,19 +80,34 @@ export async function answerStoreAssistant({ shop, message, customerId = null })
 
   let thread = null;
   if (shop) {
-    thread = await db.chatThread.create({
-      data: {
-        shop,
-        subject: "Asistente tienda",
-        channel: "store_assistant",
-        ownerType: customerId ? "customer" : "visitor",
-        ownerId: customerId ? String(customerId) : null,
-        messages: {
-          create: {
-            author: "customer",
-            body: text,
-          },
+    const requestedThreadId = String(threadId || "").trim();
+    if (requestedThreadId) {
+      thread = await db.chatThread.findFirst({
+        where: {
+          id: requestedThreadId,
+          shop,
+          channel: "store_assistant",
         },
+      });
+    }
+
+    if (!thread) {
+      thread = await db.chatThread.create({
+        data: {
+          shop,
+          subject: "Asistente tienda",
+          channel: "store_assistant",
+          ownerType: customerId ? "customer" : "visitor",
+          ownerId: customerId ? String(customerId) : null,
+        },
+      });
+    }
+
+    await db.chatMessage.create({
+      data: {
+        threadId: thread.id,
+        author: "customer",
+        body: text,
       },
     });
   }

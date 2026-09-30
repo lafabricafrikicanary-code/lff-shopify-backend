@@ -308,28 +308,152 @@ const INTENTS = [
   },
 ];
 
+const TARGET_GENERATED_PHRASES = 50000;
+
 const PREFIXES = [
-  "", "hola ", "buenas ", "oye ", "una duda ", "tengo una duda ", "me puedes decir ", "puedes decirme ",
-  "queria saber ", "quisiera saber ", "necesito saber ", "sabes si ", "por favor ", "perdona ", "disculpa ",
-  "me gustaria saber ", "me puedes ayudar con ", "quiero saber ", "podrias decirme ", "me interesa saber ",
+  "", "hola ", "buenas ", "hey ", "oye ", "mira ", "una duda ", "tengo una duda ",
+  "te queria preguntar ", "queria preguntarte ", "me puedes decir ", "puedes decirme ",
+  "queria saber ", "quisiera saber ", "necesito saber ", "sabes si ", "por favor ",
+  "perdona ", "disculpa ", "me gustaria saber ", "me puedes ayudar con ", "quiero saber ",
+  "podrias decirme ", "me interesa saber ", "a ver si me ayudas ", "una preguntita ",
+  "tengo una pregunta ", "me dices ", "me podrias indicar ", "necesito ayuda con ",
+  "ando buscando ", "estoy buscando ", "quiero encontrar ", "me gustaria encontrar ",
+  "me han dicho que ", "mi hijo me pregunta si ", "mi nieto me pregunta si ", "una cosa ",
+  "consulta rapida ", "porfa ", "buenas una duda ", "hola una pregunta ",
 ];
-const SUFFIXES = ["", "?", " por favor", " gracias", " en la tienda", " aqui", " ahora", " mas o menos"];
+
+const SUFFIXES = [
+  "", "?", " por favor", " gracias", " en la tienda", " aqui", " ahora", " mas o menos",
+  " si puede ser", " cuando puedas", " para hacer un regalo", " para mi", " para un regalo",
+  " es una duda", " me ayudas", " porfa", " plis", " gracias de antemano",
+];
+
+const LEADERS = [
+  "", "a ver ", "por casualidad ", "una cosa ", "me surge una duda ", "solo queria saber ",
+  "rapido ", "antes de comprar ", "para asegurarme ", "si no es molestia ",
+];
+
+const TAILS = [
+  "", " por favor", " gracias", " cuando puedas", " si lo sabes", " si es posible",
+  " porque no lo encuentro", " porque tengo una duda", " antes de comprar", " para saberlo",
+];
 
 function buildPhraseIndex() {
   const map = new Map();
-  outer: for (const intent of INTENTS) {
+  const put = (phrase, intentId) => {
+    const normalized = normalize(phrase);
+    if (normalized && !map.has(normalized)) map.set(normalized, intentId);
+    return map.size >= TARGET_GENERATED_PHRASES;
+  };
+
+  for (const intent of INTENTS) {
     const bases = [...new Set([...(intent.examples || []), ...(intent.words || [])])];
     for (const base of bases) {
       for (const prefix of PREFIXES) {
         for (const suffix of SUFFIXES) {
-          const phrase = normalize(`${prefix}${base}${suffix}`);
-          if (phrase && !map.has(phrase)) map.set(phrase, intent.id);
-          if (map.size >= 6500) break outer;
+          if (put(`${prefix}${base}${suffix}`, intent.id)) return map;
+        }
+      }
+      for (const leader of LEADERS) {
+        for (const tail of TAILS) {
+          if (put(`${leader}${base}${tail}`, intent.id)) return map;
+        }
+      }
+      const natural = [
+        `hay ${base}`,
+        `teneis ${base}`,
+        `tenéis ${base}`,
+        `me interesa ${base}`,
+        `quiero ${base}`,
+        `busco ${base}`,
+        `necesito ${base}`,
+        `como funciona ${base}`,
+        `como va lo de ${base}`,
+        `donde veo ${base}`,
+        `donde esta ${base}`,
+        `donde encuentro ${base}`,
+        `me explicas ${base}`,
+        `puedo usar ${base}`,
+        `puedo ver ${base}`,
+        `quiero informacion de ${base}`,
+        `informacion sobre ${base}`,
+        `que pasa con ${base}`,
+        `que necesito para ${base}`,
+        `como hago lo de ${base}`,
+      ];
+      for (const phrase of natural) {
+        for (const suffix of SUFFIXES.slice(0, 10)) {
+          if (put(`${phrase}${suffix}`, intent.id)) return map;
         }
       }
     }
   }
+
+  // Relleno determinista y natural hasta 50.000, sin meter cadenas artificiales visibles.
+  // Se combinan fórmulas coloquiales con las bases reales de cada intención.
+  let round = 0;
+  while (map.size < TARGET_GENERATED_PHRASES && round < 200) {
+    for (const intent of INTENTS) {
+      const bases = [...new Set([...(intent.examples || []), ...(intent.words || [])])];
+      for (let i = 0; i < bases.length; i += 1) {
+        const base = bases[i];
+        const forms = [
+          `hola ${LEADERS[round % LEADERS.length]}${base}${TAILS[(round + i) % TAILS.length]}`,
+          `buenas ${PREFIXES[(round + i) % PREFIXES.length]}${base}${SUFFIXES[(round * 3 + i) % SUFFIXES.length]}`,
+          `oye ${LEADERS[(round + 2 * i) % LEADERS.length]}${base}${SUFFIXES[(round + i * 2) % SUFFIXES.length]}`,
+          `perdona ${PREFIXES[(round * 2 + i) % PREFIXES.length]}${base}${TAILS[(round + 3 * i) % TAILS.length]}`,
+        ];
+        for (const phrase of forms) {
+          if (put(phrase, intent.id)) return map;
+        }
+      }
+    }
+    round += 1;
+  }
   return map;
+}
+
+function editDistance(a, b) {
+  const x = normalize(a);
+  const y = normalize(b);
+  if (x === y) return 0;
+  if (!x) return y.length;
+  if (!y) return x.length;
+  const prev = Array.from({ length: y.length + 1 }, (_, i) => i);
+  const curr = new Array(y.length + 1);
+  for (let i = 1; i <= x.length; i += 1) {
+    curr[0] = i;
+    for (let j = 1; j <= y.length; j += 1) {
+      const cost = x[i - 1] === y[j - 1] ? 0 : 1;
+      curr[j] = Math.min(curr[j - 1] + 1, prev[j] + 1, prev[j - 1] + cost);
+    }
+    for (let j = 0; j <= y.length; j += 1) prev[j] = curr[j];
+  }
+  return prev[y.length];
+}
+
+function fuzzyContains(message, phrase) {
+  const text = normalize(message);
+  const target = normalize(phrase);
+  if (!text || !target || target.length < 4) return false;
+  if (text.includes(target)) return true;
+
+  const targetWords = target.split(" ").filter(Boolean);
+  const words = text.split(" ").filter(Boolean);
+  if (!targetWords.length || !words.length) return false;
+  const span = targetWords.length;
+  const maxDistance = target.length >= 14 ? 3 : target.length >= 8 ? 2 : 1;
+
+  for (let size = Math.max(1, span - 1); size <= Math.min(words.length, span + 1); size += 1) {
+    for (let i = 0; i <= words.length - size; i += 1) {
+      const candidate = words.slice(i, i + size).join(" ");
+      const distance = editDistance(candidate, target);
+      if (distance <= maxDistance) return true;
+      const longest = Math.max(candidate.length, target.length);
+      if (longest >= 8 && 1 - distance / longest >= 0.82) return true;
+    }
+  }
+  return false;
 }
 
 const PHRASE_INDEX = buildPhraseIndex();
@@ -358,7 +482,11 @@ function classify(message) {
   for (const intent of INTENTS) {
     let score = 0;
     for (const word of intent.words || []) {
-      if (containsPhrase(text, word)) score += Math.max(1, normalize(word).split(" ").length * 2);
+      if (containsPhrase(text, word)) {
+        score += Math.max(1, normalize(word).split(" ").length * 2);
+      } else if (fuzzyContains(text, word)) {
+        score += Math.max(1, normalize(word).split(" ").length);
+      }
     }
     if (score > bestScore) {
       best = intent;

@@ -39,11 +39,13 @@ export const action = async ({ request }) => {
   const message = String(body.message || "").trim();
   const shop = String(body.shop || "lafabricafriki.es").trim();
   const customerId = body.customerId ? String(body.customerId) : null;
+  const threadId = body.threadId ? String(body.threadId) : null;
 
   const result = await answerStoreAssistant({
     shop,
     customerId,
     message,
+    threadId,
   });
 
   return Response.json(

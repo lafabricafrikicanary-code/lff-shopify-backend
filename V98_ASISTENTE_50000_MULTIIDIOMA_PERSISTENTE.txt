@@ -1,0 +1,21 @@
+LA FÁBRICA FRIKI — BACKEND V98
+ASISTENTE 50.000 FRASES + TOLERANCIA A ERRORES + HILO PERSISTENTE
+Fecha: 30/09/2026
+
+CAMBIOS
+- El fallback del asistente genera exactamente 50.000 variantes de preguntas/frases reconocibles a partir de 28 intenciones reales.
+- Mantiene 89 respuestas base naturales y selección variable para no responder siempre igual.
+- Añade coincidencia aproximada para errores ortográficos comunes en consultas generales.
+- Reutiliza el mismo ChatThread del asistente cuando el theme envía threadId, en vez de crear un hilo nuevo por cada mensaje.
+- No requiere migración Prisma.
+
+ARCHIVOS MODIFICADOS
+- app/lib/assistant-knowledge.server.js
+- app/lib/assistant.server.js
+- app/routes/api.lff.assistant.jsx
+- app/routes/apps.lff.assistant.jsx
+
+VALIDACIÓN
+- assistantKnowledgeStats(): generatedQuestionVariants = 50000
+- Pruebas locales: hola, holaaa, cuanto cueta, enbio, devoluciones.
+- Sintaxis JS validada; los .jsx modificados no contienen JSX y se validaron como módulos JS equivalentes.
