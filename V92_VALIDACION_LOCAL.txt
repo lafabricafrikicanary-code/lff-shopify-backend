@@ -1,0 +1,12 @@
+LFF BACKEND V92 · VALIDACIÓN LOCAL
+
+OK · Sintaxis de:
+- api.lff.b2b.dashboard.jsx
+- api.lff.admin.operations.jsx
+- webhooks.orders.paid.jsx
+- webhooks.orders.cancelled.jsx
+- webhooks.refunds.create.jsx
+
+OK · Migración nueva aislada: 20260930121500_b2b_quick_orders.
+OK · No se han tocado Arcade ni la MATRIX de productos.
+PENDIENTE DE CONFIRMACIÓN EN RENDER · npm run build + prisma migrate deploy + arranque Live.

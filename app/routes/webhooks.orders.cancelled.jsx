@@ -22,6 +22,10 @@ export const action = async ({ request }) => {
         where: { shop, orderGid },
         data: { status: "cancelled", cancelledAt: new Date() },
       });
+      await db.b2BQuickOrder.updateMany({
+        where: { shop, orderGid },
+        data: { status: "cancelled" },
+      }).catch(() => {});
 
       await recordAudit(shop, "order.cancelled_commissions_marked", {
         targetType: "order",

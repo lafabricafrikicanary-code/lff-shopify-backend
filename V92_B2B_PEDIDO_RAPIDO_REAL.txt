@@ -1,0 +1,47 @@
+LFF BACKEND V92 · B2B PEDIDO RÁPIDO REAL
+Fecha: 30/09/2026
+Base: Backend V91 TODO EN UNO (rama v73-postgres)
+
+OBJETIVO
+- Sustituir la lógica de pedido rápido B2B de maqueta por un flujo real con Shopify Draft Orders.
+- Dar al panel Admin datos reales de pedidos rápidos B2B además de pedidos ya pagados.
+- Mantener chats B2B persistentes para Alejandro y Gabriel (la autoría usa el administrador autenticado).
+
+CAMBIOS
+1. Nueva tabla PostgreSQL B2BQuickOrder.
+2. /api/lff/b2b/dashboard añade:
+   - catalog-search: búsqueda de productos Shopify ACTIVE.
+   - product-variants: carga paginada de hasta 1.500 variantes por producto (suficiente para la matriz actual de 754).
+   - quick-order-create: valida variantes reales, mínimo profesional de 100 €, crea Draft Order Shopify real y devuelve invoiceUrl de checkout seguro.
+3. Precios profesionales aplicados por backend:
+   - cuenta directa: -60% PVP.
+   - cuenta referida habitual: -55% PVP.
+   - primera compra de cuenta referida: -63% PVP mientras firstOrderUsed=false.
+4. Los descuentos automáticos/códigos públicos quedan desactivados en el Draft Order profesional para evitar acumulación accidental.
+5. Webhook orders/paid vincula el Draft Order rápido al pedido Shopify pagado mediante tag LFF_B2BQ_<id>.
+6. Cancelaciones y reembolsos actualizan el estado del pedido rápido.
+7. Admin view=b2b devuelve quickOrders para poder mostrar control real de pedidos pendientes/pagados en Theme V99.
+
+ARCHIVOS MODIFICADOS
+- app/routes/api.lff.b2b.dashboard.jsx
+- app/routes/api.lff.admin.operations.jsx
+- app/routes/webhooks.orders.paid.jsx
+- app/routes/webhooks.orders.cancelled.jsx
+- app/routes/webhooks.refunds.create.jsx
+- prisma/schema.prisma
+
+NUEVO
+- prisma/migrations/20260930121500_b2b_quick_orders/migration.sql
+
+VALIDACIÓN LOCAL
+- Sintaxis JS/JSX modificada: OK (copias temporales .mjs + node --check).
+- Comparación contra V91: solo cambian los archivos listados + migración + documentación.
+- npm ci/build completo: no finalizado localmente por límite de tiempo de ejecución; Render debe confirmar build + prisma migrate deploy.
+
+NO MODIFICADO
+- Arcade.
+- MATRIX de 754 variantes.
+- Productos/familias existentes.
+- Auth Admin.
+- Reglas de YouTubers/comerciales V91.
+- Theme V98 (se actualizará después a V99).

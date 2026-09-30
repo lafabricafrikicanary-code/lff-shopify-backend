@@ -149,12 +149,30 @@ async function listCommercialData(shop) {
 }
 
 async function listB2BData(shop) {
-  const [companies, recoveries, orders] = await Promise.all([
+  const [companies, recoveries, orders, quickOrders] = await Promise.all([
     db.b2BCompany.findMany({ where: { shop }, orderBy: { createdAt: "desc" }, take: 300 }),
     db.accessRecoveryRequest.findMany({ where: { shop, accountType: "b2b" }, orderBy: { createdAt: "desc" }, take: 200 }),
     db.b2BOrder.findMany({ where: { shop }, orderBy: { createdAt: "desc" }, take: 500 }),
+    db.b2BQuickOrder.findMany({ where: { shop }, orderBy: { createdAt: "desc" }, take: 500 }),
   ]);
-  return { companies: companies.map(b2bPublic), recoveries, orders };
+  return {
+    companies: companies.map(b2bPublic),
+    recoveries,
+    orders,
+    quickOrders: quickOrders.map((row) => {
+      let items = [];
+      try { items = JSON.parse(row.itemsJson || "[]"); } catch (_) {}
+      return {
+        id: row.id, companyId: row.companyId, commercialId: row.commercialId,
+        draftOrderGid: row.draftOrderGid, draftOrderName: row.draftOrderName,
+        orderGid: row.orderGid, orderName: row.orderName, status: row.status,
+        discountPercent: row.discountPercent, originalSubtotalCents: row.originalSubtotalCents,
+        professionalTotalCents: row.professionalTotalCents, currency: row.currency || "EUR",
+        invoiceUrl: row.invoiceUrl, errorMessage: row.errorMessage, items,
+        createdAt: row.createdAt, updatedAt: row.updatedAt, paidAt: row.paidAt,
+      };
+    }),
+  };
 }
 
 async function createFixedVoucher(admin, { title, code, amountCents, customerId, expiresAt }) {

@@ -232,8 +232,9 @@ model B2BCompany {
   createdAt         DateTime  @default(now())
   updatedAt         DateTime  @updatedAt
 
-  sessions B2BSession[]
-  orders   B2BOrder[]
+  sessions    B2BSession[]
+  orders      B2BOrder[]
+  quickOrders B2BQuickOrder[]
 
   @@index([shop, referredByCode])
   @@index([shop, contactEmail])
@@ -263,6 +264,36 @@ model B2BOrder {
   @@unique([shop, orderGid, companyId])
   @@index([shop, companyId, createdAt])
   @@index([shop, commercialId, createdAt])
+}
+
+
+model B2BQuickOrder {
+  id                       String    @id @default(cuid())
+  shop                     String
+  companyId                String
+  commercialId             String?
+  draftOrderGid            String?
+  draftOrderName           String?
+  orderGid                 String?
+  orderName                String?
+  status                   String    @default("creating")
+  discountPercent          Int
+  originalSubtotalCents    Int       @default(0)
+  professionalTotalCents   Int       @default(0)
+  currency                 String?
+  itemsJson                String
+  invoiceUrl               String?
+  errorMessage             String?
+  createdAt                DateTime  @default(now())
+  updatedAt                DateTime  @updatedAt
+  paidAt                   DateTime?
+
+  company B2BCompany @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  @@unique([shop, draftOrderGid])
+  @@index([shop, companyId, createdAt])
+  @@index([shop, status, createdAt])
+  @@index([shop, orderGid])
 }
 
 model ChatThread {

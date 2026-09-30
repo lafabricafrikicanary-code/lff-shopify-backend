@@ -32,6 +32,10 @@ export const action = async ({ request }) => {
             data: { status: "refund_review", refundedCents: Math.max(b2bOrder.refundedCents || 0, refundedCents) },
           });
         }
+        await db.b2BQuickOrder.updateMany({
+          where: { shop, orderGid },
+          data: { status: "refund_review" },
+        }).catch(() => {});
       }
 
       await recordAudit(shop, "refund.created_commissions_review", {

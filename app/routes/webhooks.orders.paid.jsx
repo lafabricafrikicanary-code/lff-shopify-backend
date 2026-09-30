@@ -18,6 +18,11 @@ function orderCodes(payload) {
     .filter(Boolean);
 }
 
+function orderTags(payload) {
+  if (Array.isArray(payload.tags)) return payload.tags.map((x) => String(x || "").trim()).filter(Boolean);
+  return String(payload.tags || "").split(",").map((x) => x.trim()).filter(Boolean);
+}
+
 function validationDate() {
   const date = new Date();
   date.setDate(date.getDate() + 15);
@@ -112,6 +117,22 @@ export const action = async ({ request }) => {
             paidAt: payload.processed_at ? new Date(payload.processed_at) : new Date(),
           },
         });
+        const quickTag = orderTags(payload).find((tag) => tag.startsWith("LFF_B2BQ_"));
+        const quickId = quickTag ? quickTag.slice("LFF_B2BQ_".length) : "";
+        if (quickId) {
+          await db.b2BQuickOrder.updateMany({
+            where: { id: quickId, shop, companyId: b2bCompany.id },
+            data: {
+              status: "paid",
+              orderGid,
+              orderName: payload.name || String(payload.order_number || ""),
+              professionalTotalCents: totalCents,
+              currency: String(payload.currency || payload.presentment_currency || "").slice(0, 12) || null,
+              paidAt: payload.processed_at ? new Date(payload.processed_at) : new Date(),
+              errorMessage: null,
+            },
+          }).catch(() => {});
+        }
       }
 
       // Códigos de comerciales/creadores. El último código válido usado cambia la atribución del cliente.
