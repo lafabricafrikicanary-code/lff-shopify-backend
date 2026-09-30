@@ -244,6 +244,79 @@ async function parseMultipartOrBody(request) {
   return { body: await bodyData(request), formData: null };
 }
 
+
+function trafficPeriodConfig(period) {
+  const key = String(period || "week").toLowerCase();
+  if (key === "day") return { key, ms: 24 * 60 * 60 * 1000, bucket: "hour", label: "Últimas 24 horas" };
+  if (key === "month") return { key, ms: 30 * 24 * 60 * 60 * 1000, bucket: "day", label: "Últimos 30 días" };
+  if (key === "year") return { key, ms: 365 * 24 * 60 * 60 * 1000, bucket: "month", label: "Último año" };
+  return { key: "week", ms: 7 * 24 * 60 * 60 * 1000, bucket: "day", label: "Últimos 7 días" };
+}
+
+function trafficBucketStart(date, bucket) {
+  const d = new Date(date);
+  if (bucket === "hour") return new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate(), d.getUTCHours()));
+  if (bucket === "month") return new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), 1));
+  return new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate()));
+}
+
+function trafficBucketKey(date, bucket) {
+  return trafficBucketStart(date, bucket).toISOString();
+}
+
+function trafficSeries(from, to, bucket, rows) {
+  const map = new Map();
+  const cursor = trafficBucketStart(from, bucket);
+  const limit = trafficBucketStart(to, bucket);
+  while (cursor <= limit) {
+    map.set(cursor.toISOString(), { at: cursor.toISOString(), pageViews: 0, visitors: new Set() });
+    if (bucket === "hour") cursor.setUTCHours(cursor.getUTCHours() + 1);
+    else if (bucket === "month") cursor.setUTCMonth(cursor.getUTCMonth() + 1);
+    else cursor.setUTCDate(cursor.getUTCDate() + 1);
+  }
+  for (const row of rows) {
+    const key = trafficBucketKey(row.createdAt, bucket);
+    const item = map.get(key);
+    if (!item) continue;
+    item.pageViews += 1;
+    if (row.visitorId) item.visitors.add(row.visitorId);
+  }
+  return [...map.values()].map((x) => ({ at: x.at, pageViews: x.pageViews, uniqueVisitors: x.visitors.size }));
+}
+
+async function trafficHistory(shop, period) {
+  const cfg = trafficPeriodConfig(period);
+  const now = new Date();
+  const from = new Date(now.getTime() - cfg.ms);
+  const previousFrom = new Date(from.getTime() - cfg.ms);
+  const rows = await db.trafficEvent.findMany({
+    where: { shop, event: "page_view", createdAt: { gte: previousFrom, lte: now } },
+    select: { visitorId: true, createdAt: true },
+    orderBy: { createdAt: "asc" },
+  });
+  const current = rows.filter((x) => x.createdAt >= from);
+  const previous = rows.filter((x) => x.createdAt < from);
+  const unique = (list) => new Set(list.map((x) => x.visitorId).filter(Boolean)).size;
+  const currentUnique = unique(current);
+  const previousUnique = unique(previous);
+  const changePct = previousUnique > 0 ? Math.round(((currentUnique - previousUnique) / previousUnique) * 1000) / 10 : null;
+  return {
+    ok: true,
+    period: cfg.key,
+    label: cfg.label,
+    from,
+    to: now,
+    summary: {
+      uniqueVisitors: currentUnique,
+      previousUniqueVisitors: previousUnique,
+      pageViews: current.length,
+      previousPageViews: previous.length,
+      changePct,
+    },
+    series: trafficSeries(from, now, cfg.bucket, current),
+  };
+}
+
 export const loader = async ({ request }) => {
   if (request.method === "OPTIONS") return new Response(null, { headers: corsHeaders(request) });
   try {
@@ -275,6 +348,9 @@ export const loader = async ({ request }) => {
     if (view === "retention") {
       const campaigns = await db.retentionCampaign.findMany({ where: { shop }, include: { favorite: true }, orderBy: { createdAt: "desc" }, take: 500 });
       return json(request, { ok: true, campaigns });
+    }
+    if (view === "traffic-history") {
+      return json(request, await trafficHistory(shop, url.searchParams.get("period") || "week"));
     }
     if (view === "traffic-live") {
       const activeSince = new Date(Date.now() - 90 * 1000);

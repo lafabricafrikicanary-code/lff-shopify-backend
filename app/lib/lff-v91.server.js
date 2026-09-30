@@ -234,8 +234,10 @@ function isPublicIp(ip) {
 function headerGeo(request) {
   const h = request.headers;
   const dec = (v) => { try { return decodeURIComponent(v || ""); } catch { return v || ""; } };
-  const lat = Number(h.get("x-vercel-ip-latitude") || h.get("cf-iplatitude") || "");
-  const lng = Number(h.get("x-vercel-ip-longitude") || h.get("cf-iplongitude") || "");
+  const latRaw = h.get("x-vercel-ip-latitude") || h.get("cf-iplatitude") || "";
+  const lngRaw = h.get("x-vercel-ip-longitude") || h.get("cf-iplongitude") || "";
+  const lat = latRaw === "" ? NaN : Number(latRaw);
+  const lng = lngRaw === "" ? NaN : Number(lngRaw);
   return {
     countryCode: cleanText(h.get("cf-ipcountry") || h.get("x-vercel-ip-country") || h.get("cloudfront-viewer-country"), 8) || null,
     country: cleanText(dec(h.get("x-vercel-ip-country")), 100) || null,
@@ -244,6 +246,31 @@ function headerGeo(request) {
     latitude: Number.isFinite(lat) ? Math.round(lat * 10) / 10 : null,
     longitude: Number.isFinite(lng) ? Math.round(lng * 10) / 10 : null,
   };
+}
+
+function bodyGeo(body = {}) {
+  const raw = body.geo && typeof body.geo === "object" ? body.geo : body;
+  const latRaw = raw.latitude;
+  const lngRaw = raw.longitude;
+  const lat = latRaw === null || latRaw === undefined || latRaw === "" ? NaN : Number(latRaw);
+  const lng = lngRaw === null || lngRaw === undefined || lngRaw === "" ? NaN : Number(lngRaw);
+  const latitude = Number.isFinite(lat) && lat >= -90 && lat <= 90 ? Math.round(lat * 10) / 10 : null;
+  const longitude = Number.isFinite(lng) && lng >= -180 && lng <= 180 ? Math.round(lng * 10) / 10 : null;
+  return {
+    countryCode: cleanText(raw.countryCode || raw.country_code, 8) || null,
+    country: cleanText(raw.country, 100) || null,
+    region: cleanText(raw.region, 120) || null,
+    city: cleanText(raw.city, 120) || null,
+    latitude,
+    longitude,
+  };
+}
+
+function usefulGeo(geo = {}) {
+  const hasCoords = geo.latitude != null && geo.longitude != null;
+  if (!hasCoords) return Boolean(geo.countryCode || geo.country || geo.city);
+  if (Number(geo.latitude) === 0 && Number(geo.longitude) === 0 && !geo.countryCode && !geo.country && !geo.city) return false;
+  return true;
 }
 
 async function externalGeo(ip) {
@@ -277,15 +304,22 @@ export async function upsertTrafficPresence(request, shop, body, source) {
   const ip = rawIp(request);
   const hashSalt = process.env.LFF_GEO_HASH_SALT || process.env.SHOPIFY_API_SECRET || "lff-traffic";
   const ipHash = ip ? createHash("sha256").update(`${hashSalt}|${ip}`).digest("hex") : null;
-  let geo = headerGeo(request);
+  const suppliedGeo = bodyGeo(body);
+  let geo = usefulGeo(suppliedGeo) ? suppliedGeo : headerGeo(request);
   const existing = await db.trafficPresence.findUnique({ where: { shop_visitorId: { shop, visitorId } } });
-  if ((geo.latitude == null || geo.longitude == null) && existing?.ipHash === ipHash && (existing.latitude != null || existing.countryCode)) {
-    geo = { countryCode: existing.countryCode, country: existing.country, region: existing.region, city: existing.city, latitude: existing.latitude, longitude: existing.longitude };
-  } else if ((geo.latitude == null || geo.longitude == null) && ipHash) {
+  const existingGeo = existing ? { countryCode: existing.countryCode, country: existing.country, region: existing.region, city: existing.city, latitude: existing.latitude, longitude: existing.longitude } : {};
+  if (!usefulGeo(geo) && existing?.ipHash === ipHash && usefulGeo(existingGeo)) {
+    geo = existingGeo;
+  } else if (!usefulGeo(geo) && ipHash) {
     const cached = await db.trafficPresence.findFirst({ where: { shop, ipHash, latitude: { not: null } }, orderBy: { lastSeenAt: "desc" } });
-    if (cached) geo = { countryCode: cached.countryCode, country: cached.country, region: cached.region, city: cached.city, latitude: cached.latitude, longitude: cached.longitude };
-    else geo = { ...geo, ...(await externalGeo(ip)) };
+    const cachedGeo = cached ? { countryCode: cached.countryCode, country: cached.country, region: cached.region, city: cached.city, latitude: cached.latitude, longitude: cached.longitude } : {};
+    if (usefulGeo(cachedGeo)) geo = cachedGeo;
+    else {
+      const lookedUp = await externalGeo(ip);
+      if (usefulGeo(lookedUp)) geo = lookedUp;
+    }
   }
+  if (!usefulGeo(geo)) geo = { countryCode:null, country:null, region:null, city:null, latitude:null, longitude:null };
   const data = {
     sessionKey: cleanText(body.sessionKey, 180) || null,
     customerId: cleanText(body.customerId, 100) || null,

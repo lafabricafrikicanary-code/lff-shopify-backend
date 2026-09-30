@@ -1,0 +1,16 @@
+LFF BACKEND V93 — TRÁFICO HISTÓRICO + GEO CORREGIDA
+Fecha: 30/09/2026
+Base: Backend V92
+
+CAMBIOS
+- Corrige el bug que convertía coordenadas ausentes en 0,0 (Golfo de Guinea / África).
+- Acepta geolocalización aproximada enviada por el navegador tras consentimiento analítico.
+- Mantiene fallback de geolocalización por IP sin guardar IP en claro.
+- Nuevo endpoint Admin: /api/lff/admin/operations?view=traffic-history&period=day|week|month|year
+- Histórico basado en page_view reales y visitorId persistente.
+- Devuelve visitantes únicos, páginas vistas, periodo anterior, variación y serie temporal.
+- No requiere migración Prisma nueva.
+
+VALIDACIÓN
+- node --check correcto en los 2 archivos modificados.
+- Build completo local no ejecutado porque npm ci excedió la ventana de ejecución del entorno; Render debe validar el build al desplegar.
