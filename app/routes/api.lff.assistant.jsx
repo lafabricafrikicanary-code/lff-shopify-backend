@@ -51,6 +51,8 @@ export const action = async ({ request }) => {
       ok: true,
       reply: result.reply,
       mode: result.mode,
+      intent: result.intent,
+      knowledgeStats: result.knowledgeStats,
       errorCode: result.errorCode,
       threadId: result.threadId,
     },

@@ -82,9 +82,10 @@ async function adminClient() {
 
 function productPublic(node) {
   // La miniatura del Admin debe seguir el orden REAL de la galería.
-  // V95 ya mueve la ★ PORTADA a posición 0; usar media(first: 1) evita
+  // V95+ mueve la ★ PORTADA a posición 0; usar media(first: 1) evita
   // depender de featuredMedia cuando Shopify aún conserva una referencia antigua.
   const preview = node?.media?.nodes?.[0]?.preview?.image || node?.featuredMedia?.preview?.image;
+  const taxonomy = taxonomyFromTags(node?.tags || []);
   return {
     id: node.id,
     title: node.title,
@@ -94,6 +95,10 @@ function productPublic(node) {
     updatedAt: node.updatedAt,
     variantsCount: node.variantsCount?.count ?? 0,
     mediaCount: node.mediaCount?.count ?? 0,
+    totalInventory: Number.isFinite(Number(node.totalInventory)) ? Number(node.totalInventory) : null,
+    category: taxonomy.category || "",
+    family: taxonomy.family || "",
+    tags: node.tags || [],
     image: preview?.url || "",
     onlineStoreUrl: node.onlineStoreUrl || "",
   };
@@ -111,7 +116,7 @@ async function listProducts(admin) {
         query LffAdminProducts($after: String) {
           products(first: 250, after: $after, sortKey: UPDATED_AT, reverse: true) {
             nodes {
-              id title handle status vendor updatedAt onlineStoreUrl
+              id title handle status vendor updatedAt onlineStoreUrl tags totalInventory
               variantsCount { count }
               mediaCount { count }
               media(first: 1) { nodes { id alt preview { image { url altText } } } }

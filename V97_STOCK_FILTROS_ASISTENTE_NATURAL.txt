@@ -1,0 +1,14 @@
+LFF BACKEND V97 — STOCK / FILTROS ADMIN + ASISTENTE NATURAL
+Fecha: 30/09/2026
+Base: Backend V96 MINIATURAS PORTADA ADMIN
+
+CAMBIOS
+1. Admin productos devuelve también categoría, familia, tags y stock total (totalInventory) de Shopify.
+2. Mantiene paginación completa de productos y sincronización de ★ PORTADA.
+3. Asistente fallback nuevo con 28 intenciones, 89 respuestas naturales y un índice generado de 6.500 variantes de preguntas/frases.
+4. Saludos/respuestas cortas dejan de disparar textos largos tipo robot.
+5. OpenAI, si tiene cuota, recibe instrucciones para responder breve, natural y sin inventar datos.
+6. Los endpoints del asistente devuelven intent/knowledgeStats para diagnóstico.
+
+NO HAY MIGRACIÓN PRISMA NUEVA.
+NO se toca Arcade, matriz de 754 variantes ni precios.
