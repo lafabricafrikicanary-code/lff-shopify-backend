@@ -1,0 +1,100 @@
+import { authenticate, unauthenticated } from "../shopify.server";
+
+function safeMoney(amount, currencyCode = "EUR") {
+  const value = Number(amount || 0);
+  try {
+    return new Intl.NumberFormat("es-ES", { style: "currency", currency: currencyCode || "EUR" }).format(value);
+  } catch {
+    return `${value.toFixed(2)} €`;
+  }
+}
+
+function imageFromMedia(media) {
+  const image = media?.image || media?.preview?.image || null;
+  return image?.url || "";
+}
+
+async function onlineStorePublication(admin) {
+  const response = await admin.graphql(`#graphql
+    query LffCatalogPublications {
+      publications(first: 50) { nodes { id name } }
+    }
+  `);
+  const payload = await response.json();
+  if (payload.errors?.length) throw new Error(payload.errors.map((e) => e.message).join("; "));
+  const rows = payload.data?.publications?.nodes || [];
+  return rows.find((p) => /online store|tienda online/i.test(String(p.name || ""))) || rows[0] || null;
+}
+
+async function loadCatalog(admin) {
+  const publication = await onlineStorePublication(admin);
+  if (!publication) throw new Error("No se encontró la publicación de Tienda online.");
+
+  const products = [];
+  let after = null;
+  for (let page = 0; page < 10; page += 1) {
+    const response = await admin.graphql(`#graphql
+      query LffPublicCatalog($after: String, $publicationId: ID!) {
+        products(first: 100, after: $after, query: "status:active") {
+          nodes {
+            id
+            title
+            handle
+            status
+            tags
+            onlineStoreUrl
+            totalInventory
+            publishedOnPublication(publicationId: $publicationId)
+            featuredMedia {
+              ... on MediaImage { image { url altText } }
+            }
+            priceRangeV2 { minVariantPrice { amount currencyCode } }
+            variants(first: 1) { nodes { id availableForSale price } }
+          }
+          pageInfo { hasNextPage endCursor }
+        }
+      }
+    `, { variables: { after, publicationId: publication.id } });
+    const payload = await response.json();
+    if (payload.errors?.length) throw new Error(payload.errors.map((e) => e.message).join("; "));
+    const conn = payload.data?.products;
+    for (const p of conn?.nodes || []) {
+      if (!p?.publishedOnPublication) continue;
+      const variant = p.variants?.nodes?.[0] || null;
+      const price = p.priceRangeV2?.minVariantPrice || {};
+      products.push({
+        id: p.id,
+        title: p.title || "Producto",
+        handle: p.handle || "",
+        url: p.onlineStoreUrl || (p.handle ? `/products/${p.handle}` : "#"),
+        tags: Array.isArray(p.tags) ? p.tags : [],
+        image: imageFromMedia(p.featuredMedia),
+        price: Number(price.amount || variant?.price || 0),
+        priceFormatted: safeMoney(price.amount || variant?.price || 0, price.currencyCode || "EUR"),
+        variantId: variant?.id ? String(variant.id).split("/").pop() : "",
+        available: variant ? Boolean(variant.availableForSale) : Number(p.totalInventory || 0) > 0,
+      });
+    }
+    if (!conn?.pageInfo?.hasNextPage) break;
+    after = conn.pageInfo.endCursor;
+  }
+  return products;
+}
+
+export const loader = async ({ request }) => {
+  try {
+    await authenticate.public.appProxy(request);
+    const url = new URL(request.url);
+    const shop = url.searchParams.get("shop") || process.env.SHOPIFY_SHOP_DOMAIN;
+    if (!shop) return Response.json({ ok: false, error: "Shop ausente." }, { status: 400 });
+    const { admin } = await unauthenticated.admin(shop);
+    const products = await loadCatalog(admin);
+    return Response.json(
+      { ok: true, products, count: products.length, source: "admin-online-store-publication" },
+      { headers: { "Cache-Control": "public, max-age=30, stale-while-revalidate=120" } },
+    );
+  } catch (error) {
+    console.error("[LFF CATALOG]", error);
+    return Response.json({ ok: false, products: [], error: error.message || "No se pudo cargar el catálogo." }, { status: 500 });
+  }
+};

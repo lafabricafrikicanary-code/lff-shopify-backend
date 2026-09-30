@@ -1,0 +1,5 @@
+LFF BACKEND V99 · CATÁLOGO PÚBLICO SHOPIFY
+- Nuevo GET /apps/lff/catalog autenticado como App Proxy.
+- Consulta Admin GraphQL, localiza la publicación Tienda online y devuelve únicamente productos ACTIVE realmente publicados allí.
+- Devuelve datos públicos seguros: id, título, handle/url, tags, portada, precio, primera variante y disponibilidad.
+- Sin migración Prisma.
