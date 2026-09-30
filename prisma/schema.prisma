@@ -173,30 +173,82 @@ model Commission {
 }
 
 model Payout {
-  id         String    @id @default(cuid())
-  shop       String
-  label      String
-  status     String    @default("draft")
-  totalCents Int       @default(0)
-  createdAt  DateTime  @default(now())
-  paidAt     DateTime?
+  id           String    @id @default(cuid())
+  shop         String
+  commercialId String?
+  label        String
+  status       String    @default("draft")
+  totalCents   Int       @default(0)
+  method       String?
+  reference    String?
+  notes        String?
+  paidBy       String?
+  createdAt    DateTime  @default(now())
+  paidAt       DateTime?
+  updatedAt    DateTime  @updatedAt
 
   commissions Commission[]
+
+  @@index([shop, commercialId, status])
 }
 
 model B2BCompany {
-  id             String   @id @default(cuid())
-  shop           String
-  companyName    String
-  contactEmail   String?
-  status         String   @default("pending")
-  referredByCode String?
-  commercialId   String?
-  priceTier      String   @default("direct_60")
-  createdAt      DateTime @default(now())
-  updatedAt      DateTime @updatedAt
+  id                String    @id @default(cuid())
+  shop              String
+  companyName       String
+  contactName       String?
+  contactEmail      String?
+  phone             String?
+  taxId             String?
+  website           String?
+  status            String    @default("pending")
+  referredByCode    String?
+  commercialId      String?
+  priceTier         String    @default("direct_60")
+  passwordHash      String?
+  passwordSalt      String?
+  forceChange       Boolean   @default(false)
+  failedAttempts    Int       @default(0)
+  lockedUntil       DateTime?
+  lastLoginAt       DateTime?
+  shopifyCustomerId String?
+  firstOrderUsed    Boolean   @default(false)
+  approvedAt        DateTime?
+  rejectedAt        DateTime?
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+
+  sessions B2BSession[]
+  orders   B2BOrder[]
 
   @@index([shop, referredByCode])
+  @@index([shop, contactEmail])
+  @@index([shop, status])
+}
+
+
+model B2BOrder {
+  id             String    @id @default(cuid())
+  shop           String
+  companyId      String
+  commercialId   String?
+  orderGid       String
+  orderName      String?
+  subtotalCents  Int       @default(0)
+  totalCents     Int       @default(0)
+  currency       String?
+  status         String    @default("paid")
+  paidAt         DateTime?
+  cancelledAt    DateTime?
+  refundedCents  Int       @default(0)
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  company B2BCompany @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  @@unique([shop, orderGid, companyId])
+  @@index([shop, companyId, createdAt])
+  @@index([shop, commercialId, createdAt])
 }
 
 model ChatThread {
@@ -341,4 +393,287 @@ model ArcadeSession {
   @@index([shop, game, startedAt])
   @@index([shop, customerId])
   @@index([shop, visitorId])
+}
+
+
+model CustomerAccount {
+  id                String    @id @default(cuid())
+  shop              String
+  email             String
+  name              String
+  phone             String?
+  passwordHash      String
+  passwordSalt      String
+  status            String    @default("active")
+  marketingConsent  Boolean   @default(false)
+  forceChange       Boolean   @default(false)
+  failedAttempts    Int       @default(0)
+  lockedUntil       DateTime?
+  lastLoginAt       DateTime?
+  shopifyCustomerId String?
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+
+  sessions          CustomerSession[]
+  clubProfile       ClubProfile?
+  boxSubscriptions  BoxSubscription[]
+
+  @@unique([shop, email])
+  @@index([shop, status])
+  @@index([shop, shopifyCustomerId])
+}
+
+model CustomerSession {
+  id           String          @id @default(cuid())
+  tokenHash    String          @unique
+  customerId   String
+  createdAt    DateTime        @default(now())
+  lastSeenAt   DateTime        @default(now())
+  expiresAt    DateTime
+
+  customer CustomerAccount @relation(fields: [customerId], references: [id], onDelete: Cascade)
+
+  @@index([customerId, expiresAt])
+}
+
+model ClubProfile {
+  id               String          @id @default(cuid())
+  shop             String
+  customerId       String          @unique
+  name             String
+  email            String
+  phone            String?
+  marketingConsent Boolean         @default(true)
+  joinedAt         DateTime        @default(now())
+  updatedAt        DateTime        @updatedAt
+
+  customer CustomerAccount @relation(fields: [customerId], references: [id], onDelete: Cascade)
+
+  @@index([shop, email])
+}
+
+model BoxSubscription {
+  id                     String          @id @default(cuid())
+  shop                   String
+  customerId             String?
+  email                  String
+  name                   String
+  phone                  String?
+  address                String?
+  postal                 String?
+  city                   String?
+  status                 String          @default("pending_payment")
+  monthlyPriceCents      Int             @default(1500)
+  monthlyVoucherCents    Int             @default(1500)
+  provider               String?
+  providerSubscriptionId String?
+  startedAt              DateTime?
+  nextRenewalAt          DateTime?
+  nextBoxAt              DateTime?
+  pausedAt               DateTime?
+  cancelledAt            DateTime?
+  createdAt              DateTime        @default(now())
+  updatedAt              DateTime        @updatedAt
+
+  customer CustomerAccount? @relation(fields: [customerId], references: [id], onDelete: SetNull)
+  vouchers BoxVoucher[]
+
+  @@index([shop, email, status])
+  @@index([customerId, status])
+}
+
+model BoxVoucher {
+  id                String          @id @default(cuid())
+  shop              String
+  subscriptionId    String
+  code              String          @unique
+  amountCents       Int             @default(1500)
+  status            String          @default("prepared")
+  shopifyDiscountId String?
+  createdAt         DateTime        @default(now())
+  redeemedAt        DateTime?
+  expiresAt         DateTime?
+
+  subscription BoxSubscription @relation(fields: [subscriptionId], references: [id], onDelete: Cascade)
+
+  @@index([shop, status])
+}
+
+model Favorite {
+  id               String    @id @default(cuid())
+  shop             String
+  identityKey      String
+  visitorId        String?
+  customerId       String?
+  customerEmail    String?
+  productGid       String
+  productHandle    String?
+  productTitle     String?
+  productImage     String?
+  status           String    @default("active")
+  firstFavoritedAt DateTime  @default(now())
+  lastFavoritedAt  DateTime  @default(now())
+  removedAt        DateTime?
+  purchasedAt      DateTime?
+  orderGid         String?
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+
+  campaign RetentionCampaign?
+
+  @@unique([shop, identityKey, productGid])
+  @@index([shop, customerId, productGid])
+  @@index([shop, customerEmail, productGid])
+  @@index([shop, status, lastFavoritedAt])
+}
+
+model RetentionCampaign {
+  id                String    @id @default(cuid())
+  shop              String
+  favoriteId        String    @unique
+  productGid        String
+  customerId        String?
+  customerEmail     String?
+  percent           Int       @default(20)
+  status            String    @default("waiting")
+  code              String?   @unique
+  shopifyDiscountId String?
+  eligibleAt        DateTime
+  expiresAt         DateTime?
+  createdAt         DateTime  @default(now())
+  issuedAt          DateTime?
+  sentAt            DateTime?
+  redeemedAt        DateTime?
+  purchasedAt       DateTime?
+  updatedAt         DateTime  @updatedAt
+
+  favorite Favorite @relation(fields: [favoriteId], references: [id], onDelete: Cascade)
+
+  @@index([shop, status, eligibleAt])
+  @@index([shop, customerEmail])
+}
+
+model ProductReview {
+  id            String    @id @default(cuid())
+  shop          String
+  productGid    String?
+  productHandle String?
+  productTitle  String?
+  category      String?
+  name          String
+  orderRef      String?
+  rating        Int
+  body          String
+  imageFileId   String?
+  imageUrl      String?
+  source        String    @default("customer_web")
+  status        String    @default("pending")
+  hidden        Boolean   @default(false)
+  registeredBy  String?
+  moderatedBy   String?
+  moderatedAt   DateTime?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  @@index([shop, productGid, status, hidden])
+  @@index([shop, productHandle, status, hidden])
+  @@index([shop, status, createdAt])
+}
+
+model Expense {
+  id            String    @id @default(cuid())
+  shop          String
+  concept       String
+  amountCents   Int
+  category      String
+  expenseDate   DateTime
+  paymentMethod String?
+  reference     String?
+  notes         String?
+  receiptFileId String?
+  receiptUrl    String?
+  receiptName   String?
+  createdBy     String
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+  deletedAt     DateTime?
+
+  @@index([shop, expenseDate])
+  @@index([shop, category])
+}
+
+model AccessRecoveryRequest {
+  id          String    @id @default(cuid())
+  shop        String
+  accountType String
+  accountId   String?
+  email       String
+  status      String    @default("pending")
+  source      String    @default("self_service")
+  createdAt   DateTime  @default(now())
+  handledAt   DateTime?
+  handledBy   String?
+  notes       String?
+
+  @@index([shop, accountType, status])
+  @@index([shop, email])
+}
+
+model B2BSession {
+  id         String    @id @default(cuid())
+  tokenHash  String    @unique
+  companyId  String
+  createdAt  DateTime  @default(now())
+  lastSeenAt DateTime  @default(now())
+  expiresAt  DateTime
+
+  company B2BCompany @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  @@index([companyId, expiresAt])
+}
+
+model TrafficEvent {
+  id             String    @id @default(cuid())
+  shop           String
+  visitorId      String?
+  customerId     String?
+  sessionKey     String?
+  event          String    @default("page_view")
+  source         String    @default("web")
+  sourceDetail   String?
+  path           String?
+  referrer       String?
+  campaign       String?
+  medium         String?
+  content        String?
+  term           String?
+  commercialCode String?
+  companyId      String?
+  metadataJson   String?
+  createdAt      DateTime  @default(now())
+
+  @@index([shop, createdAt])
+  @@index([shop, source, createdAt])
+  @@index([shop, event, createdAt])
+}
+
+model OutboundMessage {
+  id          String    @id @default(cuid())
+  shop        String
+  channel     String
+  recipient   String
+  template    String
+  payloadJson String?
+  relatedType String?
+  relatedId   String?
+  status      String    @default("pending_provider")
+  provider    String?
+  providerId  String?
+  createdAt   DateTime  @default(now())
+  sentAt      DateTime?
+  failedAt    DateTime?
+  error       String?
+
+  @@index([shop, status, channel])
+  @@index([shop, relatedType, relatedId])
 }

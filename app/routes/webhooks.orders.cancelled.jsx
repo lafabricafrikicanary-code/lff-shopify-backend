@@ -18,6 +18,10 @@ export const action = async ({ request }) => {
         where: { shop, orderGid },
         data: { status: "cancelled" },
       });
+      await db.b2BOrder.updateMany({
+        where: { shop, orderGid },
+        data: { status: "cancelled", cancelledAt: new Date() },
+      });
 
       await recordAudit(shop, "order.cancelled_commissions_marked", {
         targetType: "order",

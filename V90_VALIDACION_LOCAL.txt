@@ -1,0 +1,19 @@
+LA FÁBRICA FRIKI — V90 VALIDACIÓN LOCAL
+
+VALIDACIONES REALIZADAS ANTES DE EMPAQUETAR
+- Sintaxis Node/ESM de todos los JS/JSX nuevos o modificados: OK.
+- Imports relativos de todo app/: OK, sin rutas locales rotas detectadas.
+- Imports nombrados locales de archivos V90: OK.
+- Prisma schema: comprobación estática de modelos, relations, fields e índices: OK.
+- Correspondencia de columnas entre modelos nuevos y migration.sql: OK.
+- GraphQL descuentos: estructura contrastada con Admin GraphQL API 2026-07 (DiscountCodeBasicInput, context, customerGets, DiscountItemsInput).
+- No se incluye node_modules.
+- Integridad de los ZIP: comprobar después de generarlos con unzip -t.
+
+LIMITACIÓN DE LA VALIDACIÓN LOCAL
+El entorno de trabajo no pudo descargar/ejecutar Prisma CLI (timeout de red), por lo que `prisma validate` y un build completo con dependencias no se pudieron ejecutar aquí. La migración y schema sí se validaron estáticamente y deben verificarse de forma definitiva cuando Render ejecute `prisma migrate deploy` contra la PostgreSQL real.
+
+ESTADO
+GENERADO + VALIDADO LOCALMENTE.
+NO DESPLEGADO.
+NO PROBADO EN PRODUCCIÓN.

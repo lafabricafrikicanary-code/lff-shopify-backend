@@ -8,6 +8,8 @@ import db from "../db.server";
 
 const ADMIN_SESSION_HOURS = 12;
 const COMMERCIAL_SESSION_DAYS = 30;
+const CUSTOMER_SESSION_DAYS = 30;
+const B2B_SESSION_DAYS = 30;
 const MAX_FAILED_ATTEMPTS = 5;
 const LOCK_MINUTES = 15;
 
@@ -129,6 +131,29 @@ export async function noteFailedCommercialLogin(user) {
   });
 }
 
+
+export async function noteFailedCustomerLogin(user) {
+  const next = Number(user.failedAttempts || 0) + 1;
+  const lock = next >= MAX_FAILED_ATTEMPTS
+    ? new Date(Date.now() + LOCK_MINUTES * 60_000)
+    : null;
+  await db.customerAccount.update({
+    where: { id: user.id },
+    data: { failedAttempts: lock ? 0 : next, lockedUntil: lock },
+  });
+}
+
+export async function noteFailedB2BLogin(company) {
+  const next = Number(company.failedAttempts || 0) + 1;
+  const lock = next >= MAX_FAILED_ATTEMPTS
+    ? new Date(Date.now() + LOCK_MINUTES * 60_000)
+    : null;
+  await db.b2BCompany.update({
+    where: { id: company.id },
+    data: { failedAttempts: lock ? 0 : next, lockedUntil: lock },
+  });
+}
+
 export async function issueAdminSession(adminUser) {
   const token = randomBytes(32).toString("base64url");
   await db.adminSession.create({
@@ -170,6 +195,39 @@ export async function issueCommercialSession(commercial) {
   return token;
 }
 
+
+export async function issueCustomerSession(customer) {
+  const token = randomBytes(32).toString("base64url");
+  await db.customerSession.create({
+    data: {
+      tokenHash: digestToken(token),
+      customerId: customer.id,
+      expiresAt: expiresIn({ days: CUSTOMER_SESSION_DAYS }),
+    },
+  });
+  await db.customerAccount.update({
+    where: { id: customer.id },
+    data: { failedAttempts: 0, lockedUntil: null, lastLoginAt: new Date() },
+  });
+  return token;
+}
+
+export async function issueB2BSession(company) {
+  const token = randomBytes(32).toString("base64url");
+  await db.b2BSession.create({
+    data: {
+      tokenHash: digestToken(token),
+      companyId: company.id,
+      expiresAt: expiresIn({ days: B2B_SESSION_DAYS }),
+    },
+  });
+  await db.b2BCompany.update({
+    where: { id: company.id },
+    data: { failedAttempts: 0, lockedUntil: null, lastLoginAt: new Date() },
+  });
+  return token;
+}
+
 export async function requireAdminSession(request) {
   const token = bearerToken(request);
   if (!token) throw new Error("Sesión administrativa no válida.");
@@ -196,6 +254,35 @@ export async function requireCommercialSession(request) {
     throw new Error("Sesión comercial caducada o suspendida.");
   }
   return { token, session, commercial: session.commercial };
+}
+
+
+export async function requireCustomerSession(request) {
+  const token = bearerToken(request);
+  if (!token) throw new Error("Sesión de cliente no válida.");
+  const session = await db.customerSession.findUnique({
+    where: { tokenHash: digestToken(token) },
+    include: { customer: { include: { clubProfile: true, boxSubscriptions: { orderBy: { createdAt: "desc" }, take: 3, include: { vouchers: true } } } } },
+  });
+  if (!session || session.expiresAt <= new Date() || session.customer.status !== "active") {
+    if (session) await db.customerSession.delete({ where: { id: session.id } }).catch(() => {});
+    throw new Error("Sesión de cliente caducada o desactivada.");
+  }
+  return { token, session, customer: session.customer };
+}
+
+export async function requireB2BSession(request) {
+  const token = bearerToken(request);
+  if (!token) throw new Error("Sesión de tienda no válida.");
+  const session = await db.b2BSession.findUnique({
+    where: { tokenHash: digestToken(token) },
+    include: { company: true },
+  });
+  if (!session || session.expiresAt <= new Date() || session.company.status !== "active") {
+    if (session) await db.b2BSession.delete({ where: { id: session.id } }).catch(() => {});
+    throw new Error("Sesión de tienda caducada o suspendida.");
+  }
+  return { token, session, company: session.company };
 }
 
 export async function heartbeatAdminSession(session, user) {
@@ -225,6 +312,21 @@ export async function deleteCommercialSession(token) {
   await db.commercialSession.deleteMany({ where: { tokenHash: digestToken(token) } });
 }
 
+
+export async function deleteCustomerSession(token) {
+  if (!token) return;
+  await db.customerSession.deleteMany({ where: { tokenHash: digestToken(token) } });
+}
+
+export async function deleteB2BSession(token) {
+  if (!token) return;
+  await db.b2BSession.deleteMany({ where: { tokenHash: digestToken(token) } });
+}
+
 export function normalizeCommercialLogin(value) {
+  return normalizeLogin(value);
+}
+
+export function normalizeAccountLogin(value) {
   return normalizeLogin(value);
 }

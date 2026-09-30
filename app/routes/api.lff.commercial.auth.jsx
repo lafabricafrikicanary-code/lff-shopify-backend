@@ -91,16 +91,11 @@ export const action = async ({ request }) => {
     if (intent === "recover") {
       const email = String(body.email || "").trim().toLowerCase();
       if (!email) throw new Error("Introduce tu correo.");
-      await db.contactRequest.create({
-        data: {
-          shop,
-          email,
-          subject: "Recuperación de acceso comercial",
-          message: "El comercial ha solicitado recuperar su contraseña.",
-          status: "new",
-        },
+      const commercial = await db.commercialUser.findFirst({ where: { shop, email: { equals: email, mode: "insensitive" } } });
+      await db.accessRecoveryRequest.create({
+        data: { shop, accountType: "commercial", accountId: commercial?.id || null, email, source: "self_service" },
       });
-      await recordAudit(shop, "commercial.recovery_requested", { actor: email, targetType: "commercial_access" });
+      await recordAudit(shop, "commercial.recovery_requested", { actor: email, targetType: "commercial_access", targetId: commercial?.id || null });
       return json(request, { ok: true });
     }
 

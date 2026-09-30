@@ -6,6 +6,7 @@ import {
   corsHeaders,
   json,
 } from "../lib/public-api.server";
+import { recordAudit } from "../lib/lff.server";
 import {
   buildLffProductTemplate,
   templateSummary,
@@ -554,32 +555,66 @@ export const action = async ({ request }) => {
   try {
     assertAllowedOrigin(request);
     const adminAuth = await requireAdminSession(request);
+    const actor = adminAuth?.user?.displayName || adminAuth?.user?.username || "Admin";
+    const shop = shopDomain();
     const admin = await adminClient();
     const contentType = request.headers.get("content-type") || "";
     if (contentType.includes("multipart/form-data")) {
       const formData = await request.formData();
       const intent = String(formData.get("intent") || "upload-media");
       if (intent !== "upload-media") throw new Error("Acción multipart no reconocida.");
-      return json(request, { ok: true, media: await uploadProductImage(admin, formData) });
+      const media = await uploadProductImage(admin, formData);
+      await recordAudit(shop, "product.media_uploaded", { actor, targetType: "product", targetId: String(formData.get("productId") || ""), mediaId: media.id }).catch(() => {});
+      return json(request, { ok: true, media });
     }
 
     const body = await bodyData(request);
     const intent = String(body.intent || "");
-    if (intent === "create-template") return json(request, { ok: true, ...(await createFromTemplate(admin, body)), template: templateSummary() });
+    if (intent === "create-template") {
+      const result = await createFromTemplate(admin, body);
+      await recordAudit(shop, "product.created", { actor, targetType: "product", targetId: result.product?.id || result.operationId || "pending", title: body.title, category: body.category, family: body.family }).catch(() => {});
+      return json(request, { ok: true, ...result, template: templateSummary() });
+    }
     if (intent === "operation-status") return json(request, { ok: true, operation: await operationStatus(admin, body.operationId) });
     if (intent === "product-detail") return json(request, { ok: true, product: await getProductDetail(admin, body.productId), template: templateSummary() });
-    if (intent === "assign-media") return json(request, { ok: true, ...(await assignMedia(admin, body)) });
-    if (intent === "set-cover") return json(request, { ok: true, ...(await setExistingMediaCover(admin, body)) });
-    if (intent === "update-product") return json(request, { ok: true, product: await updateProductDetails(admin, body) });
-    if (intent === "apply-template-prices") return json(request, { ok: true, ...(await applyTemplatePrices(admin, body.productId)) });
-    if (intent === "set-status") return json(request, { ok: true, product: await setProductStatus(admin, body.productId, body.status) });
-    if (intent === "publish-online-store") return json(request, { ok: true, ...(await publishOnlineStore(admin, body.productId)) });
+    if (intent === "assign-media") {
+      const result = await assignMedia(admin, body);
+      await recordAudit(shop, "product.media_assigned", { actor, targetType: "product", targetId: body.productId, mediaId: body.mediaId, model: body.model, color: body.color, assigned: result.assigned }).catch(() => {});
+      return json(request, { ok: true, ...result });
+    }
+    if (intent === "set-cover") {
+      const result = await setExistingMediaCover(admin, body);
+      await recordAudit(shop, "product.cover_changed", { actor, targetType: "product", targetId: body.productId, mediaId: body.mediaId }).catch(() => {});
+      return json(request, { ok: true, ...result });
+    }
+    if (intent === "update-product") {
+      const product = await updateProductDetails(admin, body);
+      await recordAudit(shop, "product.updated", { actor, targetType: "product", targetId: body.productId, title: body.title, category: body.category, family: body.family }).catch(() => {});
+      return json(request, { ok: true, product });
+    }
+    if (intent === "apply-template-prices") {
+      const result = await applyTemplatePrices(admin, body.productId);
+      await recordAudit(shop, "product.template_prices_applied", { actor, targetType: "product", targetId: body.productId, updated: result.updated }).catch(() => {});
+      return json(request, { ok: true, ...result });
+    }
+    if (intent === "set-status") {
+      const product = await setProductStatus(admin, body.productId, body.status);
+      await recordAudit(shop, "product.status_changed", { actor, targetType: "product", targetId: body.productId, status: body.status }).catch(() => {});
+      return json(request, { ok: true, product });
+    }
+    if (intent === "publish-online-store") {
+      const result = await publishOnlineStore(admin, body.productId);
+      await recordAudit(shop, "product.published", { actor, targetType: "product", targetId: body.productId, publication: result.publication?.name, published: result.published }).catch(() => {});
+      return json(request, { ok: true, ...result });
+    }
     if (intent === "delete-product") {
       const username = String(adminAuth?.user?.username || "").toLocaleLowerCase("es-ES");
       const role = String(adminAuth?.user?.role || "").toLocaleLowerCase("es-ES");
       const canDelete = username === "alejandro" || username === "gabriel" || role === "owner";
       if (!canDelete) throw new Error("Solo Alejandro o Gabriel pueden eliminar productos.");
-      return json(request, { ok: true, ...(await deleteProduct(admin, body.productId)) });
+      const result = await deleteProduct(admin, body.productId);
+      await recordAudit(shop, "product.deleted", { actor, targetType: "product", targetId: body.productId }).catch(() => {});
+      return json(request, { ok: true, ...result });
     }
     throw new Error("Acción de producto no reconocida.");
   } catch (error) {
@@ -587,3 +622,4 @@ export const action = async ({ request }) => {
     return json(request, { ok: false, error: error.message }, { status: /sesión|autoriz/i.test(error.message) ? 401 : 400 });
   }
 };
+
