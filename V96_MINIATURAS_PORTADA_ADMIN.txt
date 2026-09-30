@@ -1,0 +1,10 @@
+LA FÁBRICA FRIKI — BACKEND V96
+Corrección: miniaturas Admin = ★ PORTADA LFF
+Fecha: 30/09/2026
+
+- El listado Admin usa ahora la primera media real ordenada del producto como miniatura.
+- Se añade acción segura por lotes `sync-cover-order-batch` para migrar productos antiguos:
+  busca la imagen cuyo ALT empieza por `LFF_PORTADA::` y la mueve a posición 0.
+- La migración visual se hace en lotes pequeños para no disparar el coste GraphQL.
+- No hay migración Prisma ni cambios en PostgreSQL.
+- No cambia la MATRIX de 754 variantes ni Arcade.

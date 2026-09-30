@@ -81,7 +81,10 @@ async function adminClient() {
 }
 
 function productPublic(node) {
-  const preview = node?.featuredMedia?.preview?.image;
+  // La miniatura del Admin debe seguir el orden REAL de la galería.
+  // V95 ya mueve la ★ PORTADA a posición 0; usar media(first: 1) evita
+  // depender de featuredMedia cuando Shopify aún conserva una referencia antigua.
+  const preview = node?.media?.nodes?.[0]?.preview?.image || node?.featuredMedia?.preview?.image;
   return {
     id: node.id,
     title: node.title,
@@ -111,6 +114,7 @@ async function listProducts(admin) {
               id title handle status vendor updatedAt onlineStoreUrl
               variantsCount { count }
               mediaCount { count }
+              media(first: 1) { nodes { id alt preview { image { url altText } } } }
               featuredMedia { id preview { image { url altText } } }
             }
             pageInfo { hasNextPage endCursor }
@@ -126,6 +130,100 @@ async function listProducts(admin) {
     cursor = connection?.pageInfo?.endCursor || null;
   }
   return products;
+}
+
+function markedCoverMedia(nodes = []) {
+  return (nodes || []).find((media) =>
+    media?.mediaContentType === "IMAGE" && String(media?.alt || "").startsWith("LFF_PORTADA::"),
+  ) || null;
+}
+
+async function findMarkedCoverForProduct(admin, product) {
+  const firstPage = product?.media || { nodes: [], pageInfo: {} };
+  const firstMediaId = firstPage.nodes?.[0]?.id || "";
+  let cover = markedCoverMedia(firstPage.nodes || []);
+  let pageInfo = firstPage.pageInfo || {};
+  let cursor = pageInfo.endCursor || null;
+  let safety = 0;
+
+  while (!cover && pageInfo.hasNextPage && safety < 5) {
+    safety += 1;
+    const response = await admin.graphql(
+      `#graphql
+        query LffCoverMediaPage($id: ID!, $after: String) {
+          product(id: $id) {
+            media(first: 200, after: $after) {
+              nodes { id alt mediaContentType }
+              pageInfo { hasNextPage endCursor }
+            }
+          }
+        }`,
+      { variables: { id: product.id, after: cursor } },
+    );
+    const payload = await response.json();
+    if (payload.errors?.length) throw new Error(payload.errors.map((e) => e.message).join("; "));
+    const connection = payload.data?.product?.media || { nodes: [], pageInfo: {} };
+    cover = markedCoverMedia(connection.nodes || []);
+    pageInfo = connection.pageInfo || {};
+    cursor = pageInfo.endCursor || null;
+  }
+
+  return { cover, firstMediaId };
+}
+
+async function syncCoverOrderBatch(admin, body = {}) {
+  const after = String(body.after || "").trim() || null;
+  const response = await admin.graphql(
+    `#graphql
+      query LffCoverOrderBatch($after: String) {
+        products(first: 4, after: $after, sortKey: UPDATED_AT, reverse: true) {
+          nodes {
+            id title
+            media(first: 200) {
+              nodes { id alt mediaContentType }
+              pageInfo { hasNextPage endCursor }
+            }
+          }
+          pageInfo { hasNextPage endCursor }
+        }
+      }`,
+    { variables: { after } },
+  );
+  const payload = await response.json();
+  if (payload.errors?.length) throw new Error(payload.errors.map((e) => e.message).join("; "));
+  const connection = payload.data?.products || { nodes: [], pageInfo: {} };
+
+  let moved = 0;
+  let alreadyCorrect = 0;
+  let withoutCover = 0;
+  const results = [];
+
+  for (const product of connection.nodes || []) {
+    const { cover, firstMediaId } = await findMarkedCoverForProduct(admin, product);
+    if (!cover) {
+      withoutCover += 1;
+      results.push({ productId: product.id, title: product.title, status: "NO_LFF_COVER" });
+      continue;
+    }
+    if (cover.id === firstMediaId) {
+      alreadyCorrect += 1;
+      results.push({ productId: product.id, title: product.title, status: "ALREADY_PRIMARY", mediaId: cover.id });
+      continue;
+    }
+    await moveMediaToPrimary(admin, product.id, cover.id);
+    moved += 1;
+    results.push({ productId: product.id, title: product.title, status: "MOVED", mediaId: cover.id });
+  }
+
+  return {
+    processed: (connection.nodes || []).length,
+    moved,
+    alreadyCorrect,
+    withoutCover,
+    results,
+    nextCursor: connection.pageInfo?.hasNextPage ? connection.pageInfo?.endCursor || null : null,
+    done: !connection.pageInfo?.hasNextPage,
+  };
 }
 
 async function waitForJob(admin, jobId, attempts = 12) {
@@ -679,6 +777,19 @@ export const action = async ({ request }) => {
     if (intent === "set-cover") {
       const result = await setExistingMediaCover(admin, body);
       await recordAudit(shop, "product.cover_changed", { actor, targetType: "product", targetId: body.productId, mediaId: body.mediaId }).catch(() => {});
+      return json(request, { ok: true, ...result });
+    }
+    if (intent === "sync-cover-order-batch") {
+      const result = await syncCoverOrderBatch(admin, body);
+      await recordAudit(shop, "product.cover_order_synced", {
+        actor,
+        targetType: "products",
+        targetId: "batch",
+        processed: result.processed,
+        moved: result.moved,
+        alreadyCorrect: result.alreadyCorrect,
+        withoutCover: result.withoutCover,
+      }).catch(() => {});
       return json(request, { ok: true, ...result });
     }
     if (intent === "delete-media") {
