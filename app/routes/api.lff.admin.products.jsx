@@ -97,22 +97,70 @@ function productPublic(node) {
 }
 
 async function listProducts(admin) {
+  const products = [];
+  let cursor = null;
+  let hasNextPage = true;
+  let safety = 0;
+  while (hasNextPage && safety < 40) {
+    safety += 1;
+    const response = await admin.graphql(
+      `#graphql
+        query LffAdminProducts($after: String) {
+          products(first: 250, after: $after, sortKey: UPDATED_AT, reverse: true) {
+            nodes {
+              id title handle status vendor updatedAt onlineStoreUrl
+              variantsCount { count }
+              mediaCount { count }
+              featuredMedia { id preview { image { url altText } } }
+            }
+            pageInfo { hasNextPage endCursor }
+          }
+        }`,
+      { variables: { after: cursor } },
+    );
+    const payload = await response.json();
+    if (payload.errors?.length) throw new Error(payload.errors.map((e) => e.message).join("; "));
+    const connection = payload.data?.products;
+    products.push(...(connection?.nodes || []).map(productPublic));
+    hasNextPage = Boolean(connection?.pageInfo?.hasNextPage);
+    cursor = connection?.pageInfo?.endCursor || null;
+  }
+  return products;
+}
+
+async function waitForJob(admin, jobId, attempts = 12) {
+  if (!jobId) return true;
+  for (let attempt = 0; attempt < attempts; attempt += 1) {
+    const response = await admin.graphql(
+      `#graphql
+        query LffJobStatus($id: ID!) {
+          job(id: $id) { id done }
+        }`,
+      { variables: { id: jobId } },
+    );
+    const payload = await response.json();
+    if (payload.errors?.length) throw new Error(payload.errors.map((e) => e.message).join("; "));
+    if (payload.data?.job?.done) return true;
+    await new Promise((resolve) => setTimeout(resolve, 250));
+  }
+  return false;
+}
+
+async function moveMediaToPrimary(admin, productId, mediaId) {
   const response = await admin.graphql(
     `#graphql
-      query LffAdminProducts {
-        products(first: 30, sortKey: UPDATED_AT, reverse: true) {
-          nodes {
-            id title handle status vendor updatedAt onlineStoreUrl
-            variantsCount { count }
-            mediaCount { count }
-            featuredMedia { id preview { image { url altText } } }
-          }
+      mutation LffReorderProductMedia($id: ID!, $moves: [MoveInput!]!) {
+        productReorderMedia(id: $id, moves: $moves) {
+          job { id done }
+          mediaUserErrors { field message code }
         }
       }`,
+    { variables: { id: productId, moves: [{ id: mediaId, newPosition: "0" }] } },
   );
   const payload = await response.json();
-  if (payload.errors?.length) throw new Error(payload.errors.map((e) => e.message).join("; "));
-  return payload.data?.products?.nodes?.map(productPublic) || [];
+  const result = gqlErrors(payload, "productReorderMedia", "mediaUserErrors");
+  if (result?.job?.id && !result.job.done) await waitForJob(admin, result.job.id);
+  return result?.job || null;
 }
 
 async function getProductDetail(admin, productId) {
@@ -303,8 +351,46 @@ async function setExistingMediaCover(admin, body) {
   );
   const payload = await response.json();
   const result = gqlErrors(payload, "productUpdateMedia", "mediaUserErrors");
+
+  // La portada LFF también pasa a ser la primera imagen real del producto en Shopify.
+  // Así featuredMedia, miniaturas de Admin, colecciones y otros canales quedan alineados
+  // con la misma ★ PORTADA elegida en La Fábrica Friki.
+  await moveMediaToPrimary(admin, productId, mediaId);
+
   return {
     cover: (result.media || []).find((media) => media.id === mediaId) || null,
+    product: await getProductDetail(admin, productId),
+  };
+}
+
+async function deleteProductMedia(admin, body) {
+  const productId = String(body.productId || "").trim();
+  const requested = Array.isArray(body.mediaIds) ? body.mediaIds : [body.mediaId];
+  const mediaIds = [...new Set(requested.map((id) => String(id || "").trim()).filter(Boolean))].slice(0, 250);
+  if (!productId || !mediaIds.length) throw new Error("Selecciona al menos una imagen para eliminar.");
+
+  const product = await getProductDetail(admin, productId);
+  const allowed = new Set((product.media || []).filter((media) => media.mediaContentType === "IMAGE").map((media) => media.id));
+  const validIds = mediaIds.filter((id) => allowed.has(id));
+  if (!validIds.length) throw new Error("Las imágenes seleccionadas ya no existen en este producto.");
+  if (validIds.length !== mediaIds.length) throw new Error("Alguna imagen seleccionada no pertenece a este producto.");
+
+  const response = await admin.graphql(
+    `#graphql
+      mutation LffDeleteProductMedia($productId: ID!, $mediaIds: [ID!]!) {
+        productDeleteMedia(productId: $productId, mediaIds: $mediaIds) {
+          deletedMediaIds
+          deletedProductImageIds
+          mediaUserErrors { field message code }
+        }
+      }`,
+    { variables: { productId, mediaIds: validIds } },
+  );
+  const payload = await response.json();
+  const result = gqlErrors(payload, "productDeleteMedia", "mediaUserErrors");
+  return {
+    deletedMediaIds: result?.deletedMediaIds || [],
+    deletedProductImageIds: result?.deletedProductImageIds || [],
     product: await getProductDetail(admin, productId),
   };
 }
@@ -593,6 +679,17 @@ export const action = async ({ request }) => {
     if (intent === "set-cover") {
       const result = await setExistingMediaCover(admin, body);
       await recordAudit(shop, "product.cover_changed", { actor, targetType: "product", targetId: body.productId, mediaId: body.mediaId }).catch(() => {});
+      return json(request, { ok: true, ...result });
+    }
+    if (intent === "delete-media") {
+      const result = await deleteProductMedia(admin, body);
+      await recordAudit(shop, "product.media_deleted", {
+        actor,
+        targetType: "product",
+        targetId: body.productId,
+        mediaIds: result.deletedMediaIds,
+        count: result.deletedMediaIds.length,
+      }).catch(() => {});
       return json(request, { ok: true, ...result });
     }
     if (intent === "update-product") {

@@ -312,8 +312,11 @@ export const action = async ({ request }) => {
   try {
     assertAllowedOrigin(request);
     const auth = await requireAdminSession(request);
-    if (String(auth?.user?.role || "").toLowerCase() !== "owner") {
-      throw new Error("Solo Alejandro puede gestionar familias y universos.");
+    const username = String(auth?.user?.username || "").toLocaleLowerCase("es-ES");
+    const role = String(auth?.user?.role || "").toLocaleLowerCase("es-ES");
+    const canManageFamilies = role === "owner" || username === "alejandro" || username === "gabriel";
+    if (!canManageFamilies) {
+      throw new Error("Solo Alejandro o Gabriel pueden gestionar familias y universos.");
     }
     const actor = auth?.user?.displayName || auth?.user?.username || "Admin";
     const contentType = request.headers.get("content-type") || "";

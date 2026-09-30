@@ -1,0 +1,13 @@
+LA FÁBRICA FRIKI · BACKEND V95
+Fecha: 30/09/2026
+Base: Backend V94 B2B catálogo categorías/familias
+
+CAMBIOS
+- Admin Productos: listado paginado de Shopify; deja de limitarse a 30 productos.
+- Portada: al marcar ★ PORTADA también se mueve esa media a posición 0 en Shopify para alinear featuredMedia/miniatura con la portada LFF.
+- Imágenes: nuevo intent delete-media para borrar uno o varios mockups reales del producto mediante Shopify Admin GraphQL.
+- Auditoría de borrado de media.
+- Familias/universos: Alejandro y Gabriel pueden gestionar familias. Antes estaba reservado al propietario.
+
+SIN CAMBIOS DE PRISMA / SIN MIGRACIÓN NUEVA.
+No se modifica Arcade, MATRIX 754, precios ni mecánica de productos.
