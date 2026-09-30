@@ -70,32 +70,59 @@ function discountPercentFor(company) {
   return 60;
 }
 
+function catalogTagValue(tags, prefix) {
+  const want = String(prefix || "").toUpperCase();
+  const hit = (tags || []).find((tag) => String(tag || "").toUpperCase().startsWith(want));
+  return hit ? String(hit).slice(prefix.length).trim() : "";
+}
+
+function catalogCategory(tags) {
+  return catalogTagValue(tags, "LFF_CATEGORY:") || "Sin categoría";
+}
+
+function catalogFamily(tags) {
+  return catalogTagValue(tags, "LFF_FAMILY:") || "Sin familia";
+}
+
 async function searchCatalog(admin, rawQuery = "") {
   const q = cleanText(rawQuery, 100).replace(/[():'"\\]/g, " ").replace(/\s+/g, " ").trim();
   const query = q ? `status:active ${q}` : "status:active";
-  const response = await admin.graphql(
-    `#graphql
-      query LffB2BCatalog($query: String!) {
-        products(first: 40, query: $query, sortKey: TITLE) {
-          nodes {
-            id
-            title
-            handle
-            status
-            featuredMedia { preview { image { url altText } } }
+  const rows = [];
+  let after = null;
+  const maxPages = q ? 2 : 4;
+  for (let page = 0; page < maxPages; page += 1) {
+    const response = await admin.graphql(
+      `#graphql
+        query LffB2BCatalog($query: String!, $after: String) {
+          products(first: 250, after: $after, query: $query, sortKey: TITLE) {
+            nodes {
+              id
+              title
+              handle
+              status
+              tags
+              featuredMedia { preview { image { url altText } } }
+            }
+            pageInfo { hasNextPage endCursor }
           }
-        }
-      }`,
-    { variables: { query } },
-  );
-  const payload = await response.json();
-  if (payload?.errors?.length) throw new Error(payload.errors.map((x) => x.message).join(" · "));
-  return (payload?.data?.products?.nodes || []).map((p) => ({
+        }`,
+      { variables: { query, after } },
+    );
+    const payload = await response.json();
+    if (payload?.errors?.length) throw new Error(payload.errors.map((x) => x.message).join(" · "));
+    const connection = payload?.data?.products;
+    rows.push(...(connection?.nodes || []));
+    if (!connection?.pageInfo?.hasNextPage) break;
+    after = connection.pageInfo.endCursor;
+  }
+  return rows.map((p) => ({
     id: p.id,
     title: p.title,
     handle: p.handle,
     image: p.featuredMedia?.preview?.image?.url || "",
     imageAlt: p.featuredMedia?.preview?.image?.altText || p.title,
+    category: catalogCategory(p.tags),
+    family: catalogFamily(p.tags),
   }));
 }
 
