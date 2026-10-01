@@ -1,0 +1,7 @@
+LFF BACKEND V102 · MOCKUP EDITOR PREVIEW
+
+- Añade mode=template al endpoint Admin Mockups.
+- Sirve únicamente la imagen base necesaria para la previsualización del editor visual, sin descargar los ~54 MB del paquete completo.
+- Lee el rango solicitado directamente de part01/part02/part03, incluso si un mockup cruza el límite entre partes.
+- Mantiene autenticación Admin y CORS existentes.
+- No añade migraciones Prisma.
