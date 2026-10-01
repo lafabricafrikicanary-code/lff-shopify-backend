@@ -1,5 +1,5 @@
 {
-  "version": "LFF-MUG-V2",
+  "version": "LFF-MUG-V3",
   "productType": "Taza",
   "input": {
     "widthCm": 21,
@@ -91,42 +91,42 @@
       },
       {
         "id": "left",
-        "x": 0.117,
-        "y": 0.558,
-        "w": 0.242,
-        "h": 0.228,
+        "x": 0.123,
+        "y": 0.57,
+        "w": 0.2264,
+        "h": 0.2133,
         "sourceStart": 0.0,
         "sourceEnd": 0.52,
-        "topBow": 0.035,
-        "bottomBow": 0.06,
+        "topBow": 0.055,
+        "bottomBow": 0.055,
         "shade": true,
-        "cylinder": 0.84
+        "cylinder": 0.92
       },
       {
         "id": "center",
-        "x": 0.373,
-        "y": 0.558,
-        "w": 0.252,
-        "h": 0.228,
+        "x": 0.3788,
+        "y": 0.57,
+        "w": 0.2398,
+        "h": 0.2133,
         "sourceStart": 0.24,
         "sourceEnd": 0.76,
-        "topBow": 0.035,
-        "bottomBow": 0.06,
+        "topBow": 0.055,
+        "bottomBow": 0.055,
         "shade": true,
-        "cylinder": 0.86
+        "cylinder": 0.92
       },
       {
         "id": "right",
-        "x": 0.643,
-        "y": 0.558,
-        "w": 0.242,
-        "h": 0.228,
+        "x": 0.648,
+        "y": 0.57,
+        "w": 0.2264,
+        "h": 0.2133,
         "sourceStart": 0.48,
         "sourceEnd": 1.0,
-        "topBow": 0.035,
-        "bottomBow": 0.06,
+        "topBow": 0.055,
+        "bottomBow": 0.055,
         "shade": true,
-        "cylinder": 0.84
+        "cylinder": 0.92
       }
     ]
   }
