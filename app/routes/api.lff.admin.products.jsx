@@ -10,7 +10,9 @@ import { recordAudit } from "../lib/lff.server";
 import { syncCreatorProductLink } from "../lib/lff-v91.server";
 import {
   buildLffProductTemplate,
+  buildLffMugProductTemplate,
   templateSummary,
+  mugTemplateSummary,
   LFF_MODEL_PRICES,
 } from "../lib/product-template.server";
 
@@ -378,6 +380,40 @@ async function createAutoMockupDraft(admin, body) {
   const response = await admin.graphql(
     `#graphql
       mutation LffCreateAutoMockupDraft($input: ProductSetInput!, $synchronous: Boolean!) {
+        productSet(input: $input, synchronous: $synchronous) {
+          product { id title handle status }
+          productSetOperation { id status userErrors { field message code } }
+          userErrors { field message code }
+        }
+      }`,
+    { variables: { input, synchronous: false } },
+  );
+  const payload = await response.json();
+  const result = gqlErrors(payload, "productSet");
+  const opErrors = result?.productSetOperation?.userErrors || [];
+  if (opErrors.length) throw new Error(opErrors.map((e) => e.message).join("; "));
+  return {
+    operationId: result?.productSetOperation?.id || "",
+    status: result?.productSetOperation?.status || (result?.product ? "COMPLETE" : "CREATED"),
+    product: result?.product || null,
+  };
+}
+
+
+async function createAutoMugDraft(admin, body) {
+  const title = String(body.title || "").trim();
+  if (title.length < 2) throw new Error("No se pudo obtener un nombre provisional para el diseño de taza.");
+  const tags = [...new Set(["LFF_AUTODRAFT", "LFF_PRODUCT_TYPE:TAZA", ...cleanTags(body.tags)])].slice(0, 50);
+  const input = buildLffMugProductTemplate({
+    title: title.slice(0, 255),
+    skuPrefix: body.skuPrefix || title,
+    vendor: body.vendor || "La Fábrica Friki",
+    descriptionHtml: String(body.descriptionHtml || ""),
+    tags,
+  });
+  const response = await admin.graphql(
+    `#graphql
+      mutation LffCreateAutoMugDraft($input: ProductSetInput!, $synchronous: Boolean!) {
         productSet(input: $input, synchronous: $synchronous) {
           product { id title handle status }
           productSetOperation { id status userErrors { field message code } }
@@ -938,8 +974,8 @@ export const loader = async ({ request }) => {
     const admin = await adminClient();
     const url = new URL(request.url);
     const productId = url.searchParams.get("productId");
-    if (productId) return json(request, { ok: true, product: await getProductDetail(admin, productId), template: templateSummary() });
-    return json(request, { ok: true, products: await listProducts(admin), template: templateSummary() });
+    if (productId) return json(request, { ok: true, product: await getProductDetail(admin, productId), template: templateSummary(), mugTemplate: mugTemplateSummary() });
+    return json(request, { ok: true, products: await listProducts(admin), template: templateSummary(), mugTemplate: mugTemplateSummary() });
   } catch (error) {
     return json(request, { ok: false, error: error.message }, { status: /sesión|autoriz/i.test(error.message) ? 401 : 400 });
   }
@@ -970,6 +1006,11 @@ export const action = async ({ request }) => {
       await recordAudit(shop, "product.auto_mockup_draft_created", { actor, targetType: "product", targetId: result.product?.id || result.operationId || "pending", title: body.title }).catch(() => {});
       return json(request, { ok: true, ...result, template: templateSummary() });
     }
+    if (intent === "create-auto-mug-draft") {
+      const result = await createAutoMugDraft(admin, body);
+      await recordAudit(shop, "product.auto_mug_draft_created", { actor, targetType: "product", targetId: result.product?.id || result.operationId || "pending", title: body.title, price: "15.00", variants: 10 }).catch(() => {});
+      return json(request, { ok: true, ...result, mugTemplate: mugTemplateSummary() });
+    }
     if (intent === "create-template") {
       const result = await createFromTemplate(admin, body);
       await recordAudit(shop, "product.created", { actor, targetType: "product", targetId: result.product?.id || result.operationId || "pending", title: body.title, category: body.category, family: body.family }).catch(() => {});
@@ -983,7 +1024,7 @@ export const action = async ({ request }) => {
       }
       return json(request, { ok: true, operation });
     }
-    if (intent === "product-detail") return json(request, { ok: true, product: await getProductDetail(admin, body.productId), template: templateSummary() });
+    if (intent === "product-detail") return json(request, { ok: true, product: await getProductDetail(admin, body.productId), template: templateSummary(), mugTemplate: mugTemplateSummary() });
     if (intent === "assign-media-batch") {
       const result = await assignMediaBatch(admin, body);
       await recordAudit(shop, "product.media_batch_assigned", { actor, targetType: "product", targetId: body.productId, assigned: result.assigned, mediaMappings: result.mediaMappings }).catch(() => {});

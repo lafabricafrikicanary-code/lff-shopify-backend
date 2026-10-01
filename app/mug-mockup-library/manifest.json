@@ -1,0 +1,36 @@
+{
+  "version": "LFF-MUG-V1",
+  "productType": "Taza",
+  "input": {
+    "widthCm": 21,
+    "heightCm": 8,
+    "aspectRatio": 2.625,
+    "note": "Diseño envolvente 8x21 cm. No se imprime el asa. El exterior de la taza permanece blanco fuera de la zona imprimible."
+  },
+  "price": "15.00",
+  "model": "Taza",
+  "size": "Única",
+  "defaultColor": "Azul claro",
+  "templates": [
+    {"id":"mug-negro","color":"Negro","colorSlug":"negro","file":"mug-negro.png"},
+    {"id":"mug-azul-claro","color":"Azul claro","colorSlug":"azul-claro","file":"mug-azul-claro.png"},
+    {"id":"mug-turquesa","color":"Turquesa","colorSlug":"turquesa","file":"mug-turquesa.png"},
+    {"id":"mug-azul-marino","color":"Azul marino","colorSlug":"azul-marino","file":"mug-azul-marino.png"},
+    {"id":"mug-amarillo","color":"Amarillo","colorSlug":"amarillo","file":"mug-amarillo.png"},
+    {"id":"mug-naranja","color":"Naranja","colorSlug":"naranja","file":"mug-naranja.png"},
+    {"id":"mug-rojo","color":"Rojo","colorSlug":"rojo","file":"mug-rojo.png"},
+    {"id":"mug-rosa","color":"Rosa","colorSlug":"rosa","file":"mug-rosa.png"},
+    {"id":"mug-morado","color":"Morado","colorSlug":"morado","file":"mug-morado.png"},
+    {"id":"mug-verde","color":"Verde","colorSlug":"verde","file":"mug-verde.png"}
+  ],
+  "render": {
+    "canvasWidth": 1122,
+    "canvasHeight": 1402,
+    "areas": [
+      {"id":"wrap","x":0.134,"y":0.211,"w":0.732,"h":0.236,"sourceStart":0.0,"sourceEnd":1.0,"topBow":0.0,"bottomBow":0.0,"shade":false},
+      {"id":"left","x":0.117,"y":0.565,"w":0.242,"h":0.207,"sourceStart":0.0,"sourceEnd":0.52,"topBow":0.045,"bottomBow":0.105,"shade":true},
+      {"id":"center","x":0.373,"y":0.565,"w":0.252,"h":0.207,"sourceStart":0.24,"sourceEnd":0.76,"topBow":0.045,"bottomBow":0.105,"shade":true},
+      {"id":"right","x":0.643,"y":0.565,"w":0.242,"h":0.207,"sourceStart":0.48,"sourceEnd":1.0,"topBow":0.045,"bottomBow":0.105,"shade":true}
+    ]
+  }
+}

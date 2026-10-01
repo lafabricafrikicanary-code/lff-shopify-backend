@@ -1,0 +1,25 @@
+LA FÁBRICA FRIKI — BACKEND V103
+BIBLIOTECA DE MOCKUPS DE TAZA + PRODUCTO DE 10 COLORES
+
+BASE: Backend V102-MOCKUP-EDITOR-PREVIEW-COMPLETO
+
+CAMBIOS:
+- Nueva biblioteca app/mug-mockup-library/ con 10 PNG independientes, uno por color.
+- Nuevo manifest LFF-MUG-V1 para impresión envolvente 8 x 21 cm.
+- api/lff/admin/mockups incorpora:
+  ?mode=mug-manifest
+  ?mode=mug-template&id=<id>
+- Nuevo template Shopify de taza:
+  Modelo: Taza
+  Color: 10 colores
+  Talla: Única
+  Precio: 15.00 EUR por variante
+  inventoryPolicy: CONTINUE
+- Nuevo intent admin products: create-auto-mug-draft.
+- Las imágenes se siguen asignando con el sistema real existente assign-media-batch por Modelo + Color.
+- LFF_MODEL_PRICES incluye Taza = 15.00 para mantener coherencia si se reaplican precios.
+
+NO CAMBIA:
+- Matriz textil 754 variantes.
+- Biblioteca textil V12 de 119 mockups.
+- Endpoints existentes.

@@ -5,7 +5,10 @@ import { assertAllowedOrigin, corsHeaders, json } from "../lib/public-api.server
 
 const LIB_DIR = path.join(process.cwd(), "app", "mockup-library");
 const MANIFEST_PATH = path.join(LIB_DIR, "manifest.json");
+const MUG_LIB_DIR = path.join(process.cwd(), "app", "mug-mockup-library");
+const MUG_MANIFEST_PATH = path.join(MUG_LIB_DIR, "manifest.json");
 let manifestCache = null;
+let mugManifestCache = null;
 let packCache = null;
 
 let packPartMetaCache = null;
@@ -54,6 +57,11 @@ function manifest() {
   return manifestCache;
 }
 
+function mugManifest() {
+  if (!mugManifestCache) mugManifestCache = JSON.parse(fs.readFileSync(MUG_MANIFEST_PATH, "utf8"));
+  return mugManifestCache;
+}
+
 export const loader = async ({ request }) => {
   if (request.method === "OPTIONS") return new Response(null, { headers: corsHeaders(request) });
   try {
@@ -62,6 +70,26 @@ export const loader = async ({ request }) => {
     const url = new URL(request.url);
     const mode = String(url.searchParams.get("mode") || "manifest");
     if (mode === "manifest") return json(request, { ok: true, library: manifest() });
+    if (mode === "mug-manifest") return json(request, { ok: true, library: mugManifest() });
+    if (mode === "mug-template") {
+      const templateId = String(url.searchParams.get("id") || "").trim();
+      const template = (mugManifest().templates || []).find((item) => String(item?.id || "") === templateId);
+      if (!template) throw new Error("Mockup de taza no encontrado.");
+      const fileName = String(template.file || "");
+      const filePath = path.join(MUG_LIB_DIR, fileName);
+      if (!fileName || path.dirname(filePath) !== MUG_LIB_DIR || !fs.existsSync(filePath)) throw new Error("La plantilla de taza está incompleta.");
+      const bytes = fs.readFileSync(filePath);
+      return new Response(bytes, {
+        status: 200,
+        headers: {
+          ...corsHeaders(request),
+          "Content-Type": "image/png",
+          "Content-Length": String(bytes.length),
+          "Cache-Control": "private, max-age=3600",
+          "Content-Disposition": `inline; filename="${template.id || "mug"}.png"`,
+        },
+      });
+    }
     if (mode === "template") {
       const templateId = String(url.searchParams.get("id") || "").trim();
       const template = (manifest().templates || []).find((item) => String(item?.id || "") === templateId);
