@@ -361,6 +361,40 @@ async function createFromTemplate(admin, body) {
   };
 }
 
+
+async function createAutoMockupDraft(admin, body) {
+  const title = String(body.title || "").trim();
+  if (title.length < 2) throw new Error("No se pudo obtener un nombre provisional para el diseño.");
+  const tags = [...new Set(["LFF_AUTODRAFT", ...cleanTags(body.tags)])].slice(0, 50);
+  const input = buildLffProductTemplate({
+    title: title.slice(0, 255),
+    skuPrefix: body.skuPrefix || title,
+    vendor: body.vendor || "La Fábrica Friki",
+    descriptionHtml: String(body.descriptionHtml || ""),
+    tags,
+  });
+  const response = await admin.graphql(
+    `#graphql
+      mutation LffCreateAutoMockupDraft($input: ProductSetInput!, $synchronous: Boolean!) {
+        productSet(input: $input, synchronous: $synchronous) {
+          product { id title handle status }
+          productSetOperation { id status userErrors { field message code } }
+          userErrors { field message code }
+        }
+      }`,
+    { variables: { input, synchronous: false } },
+  );
+  const payload = await response.json();
+  const result = gqlErrors(payload, "productSet");
+  const opErrors = result?.productSetOperation?.userErrors || [];
+  if (opErrors.length) throw new Error(opErrors.map((e) => e.message).join("; "));
+  return {
+    operationId: result?.productSetOperation?.id || "",
+    status: result?.productSetOperation?.status || (result?.product ? "COMPLETE" : "CREATED"),
+    product: result?.product || null,
+  };
+}
+
 async function operationStatus(admin, operationId) {
   if (!operationId) throw new Error("Falta el identificador de la operación.");
   const response = await admin.graphql(
@@ -651,6 +685,69 @@ async function variantsMatching(admin, productId, model, color) {
 }
 
 
+
+async function assignMediaBatch(admin, body) {
+  const productId = String(body.productId || "").trim();
+  const requested = Array.isArray(body.items) ? body.items : [];
+  const items = requested
+    .map((item) => ({
+      mediaId: String(item?.mediaId || "").trim(),
+      model: String(item?.model || "").trim(),
+      color: String(item?.color || "").trim(),
+    }))
+    .filter((item) => item.mediaId && item.model && item.color)
+    .slice(0, 250);
+  if (!productId || !items.length) throw new Error("Faltan producto o imágenes para vincular.");
+
+  const mediaByKey = new Map(items.map((item) => [`${item.model}\u0000${item.color}`, item.mediaId]));
+  const updates = [];
+  let cursor = null;
+  let more = true;
+  while (more) {
+    const response = await admin.graphql(
+      `#graphql
+        query LffVariantsForMediaBatch($id: ID!, $after: String) {
+          product(id: $id) {
+            variants(first: 250, after: $after) {
+              nodes { id selectedOptions { name value } }
+              pageInfo { hasNextPage endCursor }
+            }
+          }
+        }`,
+      { variables: { id: productId, after: cursor } },
+    );
+    const payload = await response.json();
+    if (payload.errors?.length) throw new Error(payload.errors.map((e) => e.message).join("; "));
+    const connection = payload.data?.product?.variants;
+    if (!connection) throw new Error("Producto no encontrado.");
+    for (const variant of connection.nodes || []) {
+      const map = Object.fromEntries((variant.selectedOptions || []).map((entry) => [entry.name.toLocaleLowerCase("es-ES"), entry.value]));
+      const mediaId = mediaByKey.get(`${String(map.modelo || "")}\u0000${String(map.color || "")}`);
+      if (mediaId) updates.push({ id: variant.id, mediaId });
+    }
+    more = Boolean(connection.pageInfo?.hasNextPage);
+    cursor = connection.pageInfo?.endCursor || null;
+  }
+
+  for (let i = 0; i < updates.length; i += 100) {
+    const variants = updates.slice(i, i + 100);
+    const response = await admin.graphql(
+      `#graphql
+        mutation LffAssignMediaBatch($productId: ID!, $variants: [ProductVariantsBulkInput!]!) {
+          productVariantsBulkUpdate(productId: $productId, variants: $variants, allowPartialUpdates: false) {
+            product { id }
+            productVariants { id }
+            userErrors { field message }
+          }
+        }`,
+      { variables: { productId, variants } },
+    );
+    const payload = await response.json();
+    gqlErrors(payload, "productVariantsBulkUpdate");
+  }
+  return { assigned: updates.length, mediaMappings: items.length };
+}
+
 async function applyTemplatePrices(admin, productId) {
   const updates = [];
   let cursor = null;
@@ -760,6 +857,11 @@ export const action = async ({ request }) => {
 
     const body = await bodyData(request);
     const intent = String(body.intent || "");
+    if (intent === "create-auto-mockup-draft") {
+      const result = await createAutoMockupDraft(admin, body);
+      await recordAudit(shop, "product.auto_mockup_draft_created", { actor, targetType: "product", targetId: result.product?.id || result.operationId || "pending", title: body.title }).catch(() => {});
+      return json(request, { ok: true, ...result, template: templateSummary() });
+    }
     if (intent === "create-template") {
       const result = await createFromTemplate(admin, body);
       await recordAudit(shop, "product.created", { actor, targetType: "product", targetId: result.product?.id || result.operationId || "pending", title: body.title, category: body.category, family: body.family }).catch(() => {});
@@ -774,6 +876,11 @@ export const action = async ({ request }) => {
       return json(request, { ok: true, operation });
     }
     if (intent === "product-detail") return json(request, { ok: true, product: await getProductDetail(admin, body.productId), template: templateSummary() });
+    if (intent === "assign-media-batch") {
+      const result = await assignMediaBatch(admin, body);
+      await recordAudit(shop, "product.media_batch_assigned", { actor, targetType: "product", targetId: body.productId, assigned: result.assigned, mediaMappings: result.mediaMappings }).catch(() => {});
+      return json(request, { ok: true, ...result });
+    }
     if (intent === "assign-media") {
       const result = await assignMedia(admin, body);
       await recordAudit(shop, "product.media_assigned", { actor, targetType: "product", targetId: body.productId, mediaId: body.mediaId, model: body.model, color: body.color, assigned: result.assigned }).catch(() => {});
