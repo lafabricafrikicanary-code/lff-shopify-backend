@@ -1,0 +1,8 @@
+V101 - Stock ilimitado + reparación de publicación/familias
+
+- Los productos creados con la matriz LFF siguen usando inventoryPolicy=CONTINUE.
+- Al publicar un producto se normalizan sus variantes a CONTINUE para permitir venta aunque la cantidad sea 0.
+- El listado Admin expone unlimitedStock para no confundir totalInventory=0 con producto agotado.
+- Añade sincronización por lotes de productos ACTIVE que estaban activos pero sin publicar en el canal Tienda online.
+- /apps/lff/catalog devuelve category/family canónicas e indica stock ilimitado.
+- Sin migración Prisma.

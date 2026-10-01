@@ -14,6 +14,16 @@ function imageFromMedia(media) {
   return image?.url || "";
 }
 
+function taxonomyFromTags(tags = []) {
+  const list = Array.isArray(tags) ? tags.map((tag) => String(tag || "").trim()).filter(Boolean) : [];
+  const categoryTag = list.find((tag) => /^LFF_CATEGORY:/i.test(tag)) || "";
+  const familyTag = list.find((tag) => /^LFF_FAMILY:/i.test(tag)) || "";
+  return {
+    category: categoryTag.replace(/^LFF_CATEGORY:/i, "").trim(),
+    family: familyTag.replace(/^LFF_FAMILY:/i, "").trim(),
+  };
+}
+
 async function onlineStorePublication(admin) {
   const response = await admin.graphql(`#graphql
     query LffCatalogPublications {
@@ -49,7 +59,7 @@ async function loadCatalog(admin) {
               ... on MediaImage { image { url altText } }
             }
             priceRangeV2 { minVariantPrice { amount currencyCode } }
-            variants(first: 1) { nodes { id availableForSale price } }
+            variants(first: 1) { nodes { id availableForSale price inventoryPolicy } }
           }
           pageInfo { hasNextPage endCursor }
         }
@@ -62,17 +72,21 @@ async function loadCatalog(admin) {
       if (!p?.publishedOnPublication) continue;
       const variant = p.variants?.nodes?.[0] || null;
       const price = p.priceRangeV2?.minVariantPrice || {};
+      const taxonomy = taxonomyFromTags(p.tags || []);
       products.push({
         id: p.id,
         title: p.title || "Producto",
         handle: p.handle || "",
         url: p.onlineStoreUrl || (p.handle ? `/products/${p.handle}` : "#"),
         tags: Array.isArray(p.tags) ? p.tags : [],
+        category: taxonomy.category,
+        family: taxonomy.family,
         image: imageFromMedia(p.featuredMedia),
         price: Number(price.amount || variant?.price || 0),
         priceFormatted: safeMoney(price.amount || variant?.price || 0, price.currencyCode || "EUR"),
         variantId: variant?.id ? String(variant.id).split("/").pop() : "",
-        available: variant ? Boolean(variant.availableForSale) : Number(p.totalInventory || 0) > 0,
+        available: variant ? (String(variant.inventoryPolicy || "").toUpperCase() === "CONTINUE" || Boolean(variant.availableForSale)) : true,
+        unlimitedStock: variant ? String(variant.inventoryPolicy || "").toUpperCase() === "CONTINUE" : true,
       });
     }
     if (!conn?.pageInfo?.hasNextPage) break;

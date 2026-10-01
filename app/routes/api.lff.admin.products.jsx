@@ -96,6 +96,7 @@ function productPublic(node) {
     variantsCount: node.variantsCount?.count ?? 0,
     mediaCount: node.mediaCount?.count ?? 0,
     totalInventory: Number.isFinite(Number(node.totalInventory)) ? Number(node.totalInventory) : null,
+    unlimitedStock: String(node?.variants?.nodes?.[0]?.inventoryPolicy || "").toUpperCase() === "CONTINUE",
     category: taxonomy.category || "",
     family: taxonomy.family || "",
     tags: node.tags || [],
@@ -119,6 +120,7 @@ async function listProducts(admin) {
               id title handle status vendor updatedAt onlineStoreUrl tags totalInventory
               variantsCount { count }
               mediaCount { count }
+              variants(first: 1) { nodes { inventoryPolicy } }
               media(first: 1) { nodes { id alt preview { image { url altText } } } }
               featuredMedia { id preview { image { url altText } } }
             }
@@ -569,8 +571,7 @@ async function setProductStatus(admin, productId, status) {
   return result.product;
 }
 
-async function publishOnlineStore(admin, productId) {
-  await setProductStatus(admin, productId, "ACTIVE");
+async function getOnlineStorePublication(admin) {
   const pubsResponse = await admin.graphql(
     `#graphql
       query LffPublications {
@@ -580,7 +581,114 @@ async function publishOnlineStore(admin, productId) {
   const pubsPayload = await pubsResponse.json();
   if (pubsPayload.errors?.length) throw new Error(pubsPayload.errors.map((e) => e.message).join("; "));
   const publications = pubsPayload.data?.publications?.nodes || [];
-  const online = publications.find((p) => /online store|tienda online/i.test(p.name)) || publications[0];
+  return publications.find((p) => /online store|tienda online/i.test(p.name)) || publications[0] || null;
+}
+
+async function setProductUnlimitedStock(admin, productId) {
+  const updates = [];
+  let cursor = null;
+  let more = true;
+  let safety = 0;
+  while (more && safety < 10) {
+    safety += 1;
+    const response = await admin.graphql(
+      `#graphql
+        query LffUnlimitedStockVariants($id: ID!, $after: String) {
+          product(id: $id) {
+            variants(first: 250, after: $after) {
+              nodes { id inventoryPolicy }
+              pageInfo { hasNextPage endCursor }
+            }
+          }
+        }`,
+      { variables: { id: productId, after: cursor } },
+    );
+    const payload = await response.json();
+    if (payload.errors?.length) throw new Error(payload.errors.map((e) => e.message).join("; "));
+    const connection = payload.data?.product?.variants;
+    if (!connection) throw new Error("Producto no encontrado.");
+    for (const variant of connection.nodes || []) {
+      if (String(variant.inventoryPolicy || "").toUpperCase() !== "CONTINUE") updates.push({ id: variant.id, inventoryPolicy: "CONTINUE" });
+    }
+    more = Boolean(connection.pageInfo?.hasNextPage);
+    cursor = connection.pageInfo?.endCursor || null;
+  }
+  for (let i = 0; i < updates.length; i += 100) {
+    const variants = updates.slice(i, i + 100);
+    const response = await admin.graphql(
+      `#graphql
+        mutation LffUnlimitedStock($productId: ID!, $variants: [ProductVariantsBulkInput!]!) {
+          productVariantsBulkUpdate(productId: $productId, variants: $variants, allowPartialUpdates: false) {
+            product { id }
+            userErrors { field message }
+          }
+        }`,
+      { variables: { productId, variants } },
+    );
+    const payload = await response.json();
+    gqlErrors(payload, "productVariantsBulkUpdate");
+  }
+  return { updated: updates.length };
+}
+
+async function syncActivePublicationBatch(admin, body = {}) {
+  const after = String(body.after || "").trim() || null;
+  const publication = await getOnlineStorePublication(admin);
+  if (!publication) throw new Error("No se encontró la publicación Tienda online.");
+  const response = await admin.graphql(
+    `#graphql
+      query LffRepairPublicationBatch($after: String, $publicationId: ID!) {
+        products(first: 8, after: $after, sortKey: UPDATED_AT, reverse: true) {
+          nodes {
+            id title status onlineStoreUrl
+            publishedOnPublication(publicationId: $publicationId)
+            variants(first: 1) { nodes { inventoryPolicy } }
+          }
+          pageInfo { hasNextPage endCursor }
+        }
+      }`,
+    { variables: { after, publicationId: publication.id } },
+  );
+  const payload = await response.json();
+  if (payload.errors?.length) throw new Error(payload.errors.map((e) => e.message).join("; "));
+  const connection = payload.data?.products || { nodes: [], pageInfo: {} };
+  let repaired = 0;
+  let stockNormalized = 0;
+  for (const product of connection.nodes || []) {
+    if (String(product.status || "").toUpperCase() !== "ACTIVE") continue;
+    if (!product.publishedOnPublication) {
+      const pub = await admin.graphql(
+        `#graphql
+          mutation LffRepairOnePublication($id: ID!, $publicationId: ID!) {
+            publishablePublish(id: $id, input: [{ publicationId: $publicationId }]) {
+              publishable { publishedOnPublication(publicationId: $publicationId) }
+              userErrors { field message }
+            }
+          }`,
+        { variables: { id: product.id, publicationId: publication.id } },
+      );
+      const pubPayload = await pub.json();
+      gqlErrors(pubPayload, "publishablePublish");
+      repaired += 1;
+    }
+    if (String(product?.variants?.nodes?.[0]?.inventoryPolicy || "").toUpperCase() !== "CONTINUE") {
+      const stock = await setProductUnlimitedStock(admin, product.id);
+      stockNormalized += Number(stock.updated || 0);
+    }
+  }
+  return {
+    repaired,
+    stockNormalized,
+    publication: { id: publication.id, name: publication.name },
+    hasNextPage: Boolean(connection.pageInfo?.hasNextPage),
+    nextAfter: connection.pageInfo?.endCursor || "",
+  };
+}
+
+async function publishOnlineStore(admin, productId) {
+  await setProductStatus(admin, productId, "ACTIVE");
+  await setProductUnlimitedStock(admin, productId);
+  const online = await getOnlineStorePublication(admin);
   if (!online) throw new Error("No se encontró una publicación/canal donde publicar el producto.");
   const response = await admin.graphql(
     `#graphql
@@ -934,6 +1042,16 @@ export const action = async ({ request }) => {
     if (intent === "publish-online-store") {
       const result = await publishOnlineStore(admin, body.productId);
       await recordAudit(shop, "product.published", { actor, targetType: "product", targetId: body.productId, publication: result.publication?.name, published: result.published }).catch(() => {});
+      return json(request, { ok: true, ...result });
+    }
+    if (intent === "sync-active-publication-batch") {
+      const result = await syncActivePublicationBatch(admin, body);
+      await recordAudit(shop, "product.publication_repair_batch", { actor, repaired: result.repaired, stockNormalized: result.stockNormalized }).catch(() => {});
+      return json(request, { ok: true, ...result });
+    }
+    if (intent === "set-unlimited-stock") {
+      const result = await setProductUnlimitedStock(admin, body.productId);
+      await recordAudit(shop, "product.unlimited_stock_enabled", { actor, targetType: "product", targetId: body.productId, updated: result.updated }).catch(() => {});
       return json(request, { ok: true, ...result });
     }
     if (intent === "delete-product") {
