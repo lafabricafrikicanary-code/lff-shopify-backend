@@ -80,13 +80,11 @@ export function buildLffMugProductTemplate({ title, skuPrefix, vendor = "La Fáb
     productOptions: [
       { name: "Modelo", position: 1, values: [{ name: "Taza" }] },
       { name: "Color", position: 2, values: LFF_MUG_COLORS.map(({ name }) => ({ name })) },
-      { name: "Talla", position: 3, values: [{ name: "Única" }] },
     ],
     variants: LFF_MUG_COLORS.map(({ name, code }) => ({
       optionValues: [
         { optionName: "Modelo", name: "Taza" },
         { optionName: "Color", name },
-        { optionName: "Talla", name: "Única" },
       ],
       price: "15.00",
       sku: `${prefix}-MUG-${code}`,
@@ -100,7 +98,6 @@ export function mugTemplateSummary() {
   return {
     variantCount: LFF_MUG_COLORS.length,
     model: "Taza",
-    size: "Única",
     price: "15.00",
     colors: LFF_MUG_COLORS.map(({ name }) => name),
     inputSize: "8x21 cm",

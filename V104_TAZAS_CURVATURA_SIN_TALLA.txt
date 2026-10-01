@@ -1,0 +1,19 @@
+LA FÁBRICA FRIKI — BACKEND V104
+TAZAS SIN TALLA + MANIFEST DE CURVATURA V2
+
+BASE: Backend V103-MOCKUP-TAZAS
+
+CAMBIOS:
+- El producto Taza deja de crear la opción Talla y ya no usa “Única”.
+- Opciones Shopify para tazas: Modelo + Color.
+- Se mantienen 10 variantes, una por color, a 15.00 EUR.
+- inventoryPolicy: CONTINUE en las 10 variantes.
+- La vinculación de imágenes sigue siendo Modelo=Taza + Color, por lo que cada color conserva su mockup automático.
+- Manifest actualizado a LFF-MUG-V2 con geometría de impresión más alta para reducir/igualar bordes blancos superior/inferior.
+- Las tres vistas inferiores incorporan parámetros cylinder para que Theme V117 aplique la proyección cilíndrica real.
+
+NO CAMBIA:
+- Matriz textil de 754 variantes.
+- Biblioteca textil V12 de 119 mockups.
+- Precio de taza: 15.00 EUR.
+- Los 10 PNG base de color.
