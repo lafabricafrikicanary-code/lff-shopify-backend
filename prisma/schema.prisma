@@ -809,3 +809,15 @@ model OutboundMessage {
   @@index([shop, status, channel])
   @@index([shop, relatedType, relatedId])
 }
+
+// V140: lightweight public product listings, shared and persistent across clients.
+// This table stores no mockups, product variant matrices, secrets or personal data.
+model LffCatalogLiteSnapshot {
+  shop      String
+  category  String
+  products  Json
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@id([shop, category])
+}
