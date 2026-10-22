@@ -55,6 +55,30 @@ export function buildLffProductTemplate({ title, skuPrefix, vendor = "La Fábric
 }
 
 
+// V141: prueba optativa, mantiene intacta la matriz histórica de 754 combinaciones.
+// Modelo es la única opción de Shopify. Color y Talla son propiedades del pedido.
+export function buildLffLiteApparelTemplate({ title, skuPrefix, vendor = "La Fábrica Friki", descriptionHtml = "", tags = [] }) {
+  const prefix = normalizeSkuPrefix(skuPrefix || title, "LFF");
+  const modelValues = LFF_TEMPLATE_MODELS.map(({ name }) => ({ name }));
+  return {
+    title: String(title || "").trim(),
+    descriptionHtml: String(descriptionHtml || ""),
+    vendor: String(vendor || "La Fábrica Friki").trim(),
+    productType: "Merchandising LFF",
+    tags: [...new Set([...(Array.isArray(tags) ? tags : []), "LFF_LIGHT_OPTIONS_V1"])],
+    status: "DRAFT",
+    productOptions: [{ name: "Modelo", position: 1, values: modelValues }],
+    variants: LFF_TEMPLATE_MODELS.map(({ name, code }) => ({
+      optionValues: [{ optionName: "Modelo", name }],
+      price: LFF_MODEL_PRICES[name] || "19.99",
+      sku: `${prefix}-${code}-LITE`,
+      taxable: true,
+      inventoryPolicy: "CONTINUE",
+    })),
+  };
+}
+
+
 export const LFF_MUG_COLORS = [
   { name: "Negro", code: "BK" },
   { name: "Azul claro", code: "LB" },

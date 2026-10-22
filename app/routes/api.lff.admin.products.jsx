@@ -10,6 +10,7 @@ import { recordAudit } from "../lib/lff.server";
 import { syncCreatorProductLink } from "../lib/lff-v91.server";
 import {
   buildLffProductTemplate,
+  buildLffLiteApparelTemplate,
   buildLffMugProductTemplate,
   templateSummary,
   mugTemplateSummary,
@@ -400,6 +401,38 @@ async function createAutoMockupDraft(admin, body) {
 }
 
 
+// V141: una prueba aislada con 6 variantes, sin alterar el generador clásico.
+async function createAutoLiteDraft(admin, body) {
+  const title = String(body.title || "").trim();
+  if (title.length < 2) throw new Error("No se pudo obtener un nombre para el diseño de prueba.");
+  const tags = [...new Set(["LFF_AUTODRAFT", ...cleanTags(body.tags)])].slice(0, 49);
+  const input = buildLffLiteApparelTemplate({
+    title: title.slice(0, 255), skuPrefix: body.skuPrefix || title,
+    vendor: body.vendor || "La Fábrica Friki", descriptionHtml: String(body.descriptionHtml || ""), tags,
+  });
+  const response = await admin.graphql(
+    `#graphql
+      mutation LffCreateLiteDraft($input: ProductSetInput!, $synchronous: Boolean!) {
+        productSet(input: $input, synchronous: $synchronous) {
+          product { id title handle status }
+          productSetOperation { id status userErrors { field message code } }
+          userErrors { field message code }
+        }
+      }`,
+    { variables: { input, synchronous: false } },
+  );
+  const payload = await response.json();
+  const result = gqlErrors(payload, "productSet");
+  const opErrors = result?.productSetOperation?.userErrors || [];
+  if (opErrors.length) throw new Error(opErrors.map((e) => e.message).join("; "));
+  return {
+    operationId: result?.productSetOperation?.id || "",
+    status: result?.productSetOperation?.status || (result?.product ? "COMPLETE" : "CREATED"),
+    product: result?.product || null,
+  };
+}
+
+
 async function createAutoMugDraft(admin, body) {
   const title = String(body.title || "").trim();
   if (title.length < 2) throw new Error("No se pudo obtener un nombre provisional para el diseño de taza.");
@@ -465,7 +498,19 @@ async function updateProductDetails(admin, body) {
   if (title.length < 2) throw new Error("Escribe un nombre válido para el artículo.");
   if (!category) throw new Error("Selecciona una categoría.");
   if (!family) throw new Error("Selecciona una familia / universo.");
-  const tags = [...new Set([...organizationalTags(category, family), ...cleanTags(body.tags)])].slice(0, 50);
+  // La marca de modo ligero es interna; no se puede perder al guardar desde Administración.
+  const existingResponse = await admin.graphql(`
+    #graphql query LffKeepModeTag($id: ID!) { product(id: $id) { tags } }`,
+    { variables: { id: productId } },
+  );
+  const existingPayload = await existingResponse.json();
+  if (existingPayload.errors?.length) throw new Error(existingPayload.errors.map((e) => e.message).join("; "));
+  const existingTags = existingPayload.data?.product?.tags || [];
+  const internal = existingTags.includes("LFF_LIGHT_OPTIONS_V1") ? ["LFF_LIGHT_OPTIONS_V1"] : [];
+  const tags = [...new Set([...organizationalTags(category, family), ...cleanTags(body.tags), ...internal])].slice(0, 50);
+  if (internal.length && !tags.includes(internal[0])) {
+    tags[49] = internal[0];
+  }
   const product = {
     id: productId,
     title: title.slice(0, 255),
@@ -843,7 +888,24 @@ async function assignMediaBatch(admin, body) {
     .slice(0, 250);
   if (!productId || !items.length) throw new Error("Faltan producto o imágenes para vincular.");
 
+  const productModeResponse = await admin.graphql(
+    `#graphql query LffProductMediaMode($id: ID!) { product(id: $id) { tags } }`,
+    { variables: { id: productId } },
+  );
+  const modePayload = await productModeResponse.json();
+  if (modePayload.errors?.length) throw new Error(modePayload.errors.map((e) => e.message).join("; "));
+  if (!modePayload.data?.product) throw new Error("Producto no encontrado.");
+  const isLite = (modePayload.data.product.tags || []).includes("LFF_LIGHT_OPTIONS_V1");
   const mediaByKey = new Map(items.map((item) => [`${item.model}\u0000${item.color}`, item.mediaId]));
+  const mediaByModel = new Map();
+  if (isLite) {
+    for (const item of items) {
+      const previous = mediaByModel.get(item.model);
+      // Se asigna solo una imagen representativa a cada una de las seis variantes.
+      // Las 119 fotos siguen en la galería y se seleccionan por el Color escogido.
+      if (!previous || item.color === "Negro") mediaByModel.set(item.model, item.mediaId);
+    }
+  }
   const updates = [];
   let cursor = null;
   let more = true;
@@ -866,7 +928,9 @@ async function assignMediaBatch(admin, body) {
     if (!connection) throw new Error("Producto no encontrado.");
     for (const variant of connection.nodes || []) {
       const map = Object.fromEntries((variant.selectedOptions || []).map((entry) => [entry.name.toLocaleLowerCase("es-ES"), entry.value]));
-      const mediaId = mediaByKey.get(`${String(map.modelo || "")}\u0000${String(map.color || "")}`);
+      const mediaId = isLite
+        ? mediaByModel.get(String(map.modelo || ""))
+        : mediaByKey.get(`${String(map.modelo || "")}\u0000${String(map.color || "")}`);
       if (mediaId) updates.push({ id: variant.id, mediaId });
     }
     more = Boolean(connection.pageInfo?.hasNextPage);
@@ -1005,6 +1069,11 @@ export const action = async ({ request }) => {
       const result = await createAutoMockupDraft(admin, body);
       await recordAudit(shop, "product.auto_mockup_draft_created", { actor, targetType: "product", targetId: result.product?.id || result.operationId || "pending", title: body.title }).catch(() => {});
       return json(request, { ok: true, ...result, template: templateSummary() });
+    }
+    if (intent === "create-auto-lite-draft") {
+      const result = await createAutoLiteDraft(admin, body);
+      await recordAudit(shop, "product.auto_lite_draft_created", { actor, targetType: "product", targetId: result.product?.id || result.operationId || "pending", title: body.title, variants: 6 }).catch(() => {});
+      return json(request, { ok: true, ...result, variantCount: 6 });
     }
     if (intent === "create-auto-mug-draft") {
       const result = await createAutoMugDraft(admin, body);
