@@ -95,6 +95,7 @@ function productPublic(node) {
     handle: node.handle,
     status: node.status,
     vendor: node.vendor,
+    productType: node.productType || "",
     updatedAt: node.updatedAt,
     variantsCount: node.variantsCount?.count ?? 0,
     mediaCount: node.mediaCount?.count ?? 0,
@@ -114,7 +115,7 @@ async function listProductsPage(admin, after = null) {
       query LffAdminProductsPage($after: String) {
         products(first: 100, after: $after, sortKey: ID, reverse: true) {
           nodes {
-            id title handle status vendor updatedAt onlineStoreUrl tags totalInventory
+            id title handle status vendor productType updatedAt onlineStoreUrl tags totalInventory
             variantsCount { count }
             mediaCount { count }
             variants(first: 1) { nodes { inventoryPolicy } }
@@ -350,7 +351,7 @@ async function createFromTemplate(admin, body) {
   if (!category) throw new Error("Selecciona una categoría para el artículo.");
   if (!family) throw new Error("Selecciona una familia / universo para el artículo.");
   const tags = [...new Set([...organizationalTags(category, family), ...cleanTags(body.tags)])].slice(0, 50);
-  const input = buildLffProductTemplate({
+  const input = buildLffLiteApparelTemplate({
     title,
     skuPrefix: body.skuPrefix,
     vendor: body.vendor || "La Fábrica Friki",
