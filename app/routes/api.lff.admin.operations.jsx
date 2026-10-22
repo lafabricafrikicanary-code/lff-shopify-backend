@@ -29,7 +29,11 @@ function actor(auth) {
 }
 
 function ownerOnly(auth) {
-  if (String(auth?.user?.role || "").toLowerCase() !== "owner") throw new Error("Solo Alejandro puede realizar esta acción.");
+  // V116: ambos administradores designados tienen los mismos permisos operativos.
+  const name = String(auth?.user?.username || "").trim().toLocaleLowerCase("es-ES");
+  if (!auth?.user?.enabled || !["alejandro", "gabriel"].includes(name)) {
+    throw new Error("Solo los administradores autorizados pueden realizar esta acción.");
+  }
 }
 
 function reviewPublic(row) {
@@ -317,6 +321,41 @@ async function trafficHistory(shop, period) {
   };
 }
 
+
+const SOCIAL_NETWORKS = ["instagram","tiktok","x","facebook","youtube","pinterest"];
+function socialNetworkFromEvent(row = {}) {
+  const text = [row.sourceDetail,row.referrer,row.campaign,row.medium,row.path].filter(Boolean).join(" ").toLowerCase();
+  if (/instagram|instagr\.am/.test(text)) return "instagram";
+  if (/tiktok/.test(text)) return "tiktok";
+  if (/(^|[^a-z])x\.com|twitter/.test(text)) return "x";
+  if (/facebook|fb\.com|fbclid/.test(text)) return "facebook";
+  if (/youtube|youtu\.be/.test(text)) return "youtube";
+  if (/pinterest|pin\.it/.test(text)) return "pinterest";
+  if (row.event === "social_click" && row.metadataJson) {
+    try { const m = JSON.parse(row.metadataJson); const n = String(m?.network || "").toLowerCase(); if (SOCIAL_NETWORKS.includes(n)) return n; } catch {}
+  }
+  return null;
+}
+async function socialImpact(shop, daysRaw) {
+  const days = Math.max(1, Math.min(365, Number(daysRaw) || 30));
+  const from = new Date(Date.now() - days * 86400000);
+  const rows = await db.trafficEvent.findMany({
+    where: { shop, createdAt: { gte: from }, event: { in: ["page_view","order_paid","social_click"] } },
+    select: { event:true, visitorId:true, sourceDetail:true, referrer:true, campaign:true, medium:true, path:true, metadataJson:true },
+    orderBy: { createdAt:"desc" },
+    take: 50000,
+  });
+  const map = Object.fromEntries(SOCIAL_NETWORKS.map(network => [network,{network,pageViews:0,orders:0,outboundClicks:0,visitorIds:new Set()}]));
+  for (const row of rows) {
+    const network = socialNetworkFromEvent(row); if (!network || !map[network]) continue;
+    const item = map[network];
+    if (row.event === "page_view") { item.pageViews++; if (row.visitorId) item.visitorIds.add(row.visitorId); }
+    else if (row.event === "order_paid") item.orders++;
+    else if (row.event === "social_click") item.outboundClicks++;
+  }
+  return { ok:true, days, from, networks:SOCIAL_NETWORKS.map(network => { const x=map[network]; return { network, pageViews:x.pageViews, uniqueVisitors:x.visitorIds.size, orders:x.orders, outboundClicks:x.outboundClicks }; }) };
+}
+
 export const loader = async ({ request }) => {
   if (request.method === "OPTIONS") return new Response(null, { headers: corsHeaders(request) });
   try {
@@ -351,6 +390,9 @@ export const loader = async ({ request }) => {
     }
     if (view === "traffic-history") {
       return json(request, await trafficHistory(shop, url.searchParams.get("period") || "week"));
+    }
+    if (view === "social-impact") {
+      return json(request, await socialImpact(shop, url.searchParams.get("days") || "30"));
     }
     if (view === "traffic-live") {
       const activeSince = new Date(Date.now() - 90 * 1000);

@@ -123,13 +123,13 @@ export const action = async ({ request }) => {
     }
 
     if (intent === "team") {
-      if (user.role !== "owner") return json(request, { ok: false, error: "Solo Alejandro puede gestionar administradores." }, { status: 403 });
+      if (!["alejandro", "gabriel"].includes(String(user.username || "").toLocaleLowerCase("es-ES"))) return json(request, { ok: false, error: "Solo los administradores autorizados pueden gestionar cuentas." }, { status: 403 });
       const admins = await db.adminUser.findMany({ where: { shop }, orderBy: { displayName: "asc" } });
       return json(request, { ok: true, admins: admins.map(adminPublic) });
     }
 
     if (intent === "toggle-gabriel") {
-      if (user.role !== "owner") return json(request, { ok: false, error: "Solo Alejandro puede gestionar esta cuenta." }, { status: 403 });
+      if (!["alejandro", "gabriel"].includes(String(user.username || "").toLocaleLowerCase("es-ES"))) return json(request, { ok: false, error: "Solo los administradores autorizados pueden gestionar esta cuenta." }, { status: 403 });
       const gabriel = await db.adminUser.findFirst({ where: { shop, username: { equals: "Gabriel", mode: "insensitive" } } });
       if (!gabriel) throw new Error("No se encontró la cuenta Gabriel.");
       const enabled = Boolean(body.enabled);
@@ -145,7 +145,7 @@ export const action = async ({ request }) => {
     }
 
     if (intent === "reset-gabriel-time") {
-      if (user.role !== "owner") return json(request, { ok: false, error: "Solo Alejandro puede reiniciar el contador." }, { status: 403 });
+      if (!["alejandro", "gabriel"].includes(String(user.username || "").toLocaleLowerCase("es-ES"))) return json(request, { ok: false, error: "Solo los administradores autorizados pueden reiniciar el contador." }, { status: 403 });
       const gabriel = await db.adminUser.findFirst({ where: { shop, username: { equals: "Gabriel", mode: "insensitive" } } });
       if (!gabriel) throw new Error("No se encontró la cuenta Gabriel.");
       await db.adminUser.update({ where: { id: gabriel.id }, data: { totalActiveSeconds: 0 } });

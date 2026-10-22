@@ -10,6 +10,9 @@ export const DEFAULT_LFF_CATEGORIES = [
   { key: "disney", name: "Disney", order: 3, state: "published", isCustom: false },
   { key: "multiusos", name: "Multiusos", order: 4, state: "published", isCustom: false },
   { key: "youtubers", name: "YouTubers", order: 5, state: "preparation", isCustom: true },
+  { key: "kpop", name: "K-pop", order: 6, state: "hidden", isCustom: true },
+  { key: "hentai", name: "Hentai", order: 7, state: "hidden", isCustom: true },
+  { key: "libros", name: "Libros", order: 8, state: "hidden", isCustom: true },
 ];
 
 export function slugKey(value) {

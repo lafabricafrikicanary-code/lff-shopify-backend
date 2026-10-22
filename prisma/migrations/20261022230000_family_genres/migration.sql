@@ -1,0 +1,1 @@
+ALTER TABLE "LffFamily" ADD COLUMN IF NOT EXISTS "genresJson" TEXT;

@@ -406,6 +406,7 @@ model LffFamily {
   enabled       Boolean  @default(true)
   isCustom      Boolean  @default(false)
   aliasesJson   String?
+  genresJson    String?
   logoFileId    String?
   logoUrl       String?
   motionFileId  String?

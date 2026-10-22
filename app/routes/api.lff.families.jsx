@@ -24,6 +24,20 @@ async function cleanCategory(value) {
   return row.name;
 }
 
+const ALLOWED_GENRES = new Set([
+  "Acción", "Aventura", "Fantasía", "Ciencia ficción", "Comedia", "Drama", "Romance",
+  "Terror", "Misterio", "Deportes", "Musical", "Slice of Life", "Histórico",
+  "Infantil", "Shojo", "Shonen", "Seinen", "Josei", "Isekai", "Mecha",
+  "K-pop", "Literatura", "Otros",
+]);
+function cleanGenres(value) {
+  const values = Array.isArray(value) ? value : String(value || "").split(",");
+  return [...new Set(values.map(x=>String(x||"").trim()).filter(x=>ALLOWED_GENRES.has(x)))].slice(0, 8);
+}
+function parseGenres(value) {
+  try { return cleanGenres(JSON.parse(value || "[]")); } catch { return []; }
+}
+
 function cleanAliases(value) {
   const items = Array.isArray(value)
     ? value
@@ -43,6 +57,7 @@ function familyPublic(row) {
     enabled: row.enabled,
     isCustom: row.isCustom,
     aliases,
+    genres: parseGenres(row.genresJson),
     logoFileId: row.logoFileId || "",
     logoUrl: row.logoUrl || "",
     motionFileId: row.motionFileId || "",
@@ -72,6 +87,7 @@ async function saveFamily(body, actor = "Admin") {
   const enabled = body.enabled === false || body.enabled === "false" ? false : true;
   const isCustom = body.isCustom === true || body.isCustom === "true";
   const aliases = cleanAliases(body.aliases);
+  const genres = cleanGenres(body.genres);
   const shop = shopDomain();
   const creatorId = String(body.creatorId || "").trim() || null;
   if (creatorId) {
@@ -87,6 +103,7 @@ async function saveFamily(body, actor = "Admin") {
       enabled,
       isCustom,
       aliasesJson: JSON.stringify(aliases),
+      genresJson: JSON.stringify(genres),
       creatorId,
     },
     create: {
@@ -98,6 +115,7 @@ async function saveFamily(body, actor = "Admin") {
       enabled,
       isCustom,
       aliasesJson: JSON.stringify(aliases),
+      genresJson: JSON.stringify(genres),
       creatorId,
     },
     include: { creator: { select: { id: true, name: true, brandName: true, kind: true, status: true } } },
@@ -110,6 +128,7 @@ async function saveFamily(body, actor = "Admin") {
     category,
     name,
     sortOrder,
+    genres,
     enabled,
     creatorId,
   }).catch(() => {});

@@ -12,6 +12,7 @@ import {
   buildLffProductTemplate,
   buildLffLiteApparelTemplate,
   buildLffMugProductTemplate,
+  buildLffPosterTemplate,
   templateSummary,
   mugTemplateSummary,
   LFF_MODEL_PRICES,
@@ -446,6 +447,35 @@ async function createAutoLiteDraft(admin, body) {
   };
 }
 
+
+async function createAutoPosterDraft(admin, body) {
+  const title = String(body.title || "").trim();
+  if (title.length < 2) throw new Error("Escribe un nombre de póster válido.");
+  const input = buildLffPosterTemplate({
+    title: title.slice(0, 255), skuPrefix: body.skuPrefix || title,
+    vendor: body.vendor || "La Fábrica Friki",
+  });
+  const response = await admin.graphql(
+    `#graphql
+      mutation LffCreatePosterDraft($input: ProductSetInput!, $synchronous: Boolean!) {
+        productSet(input: $input, synchronous: $synchronous) {
+          product { id title handle status }
+          productSetOperation { id status userErrors { field message code } }
+          userErrors { field message code }
+        }
+      }`,
+    { variables: { input, synchronous: false } },
+  );
+  const payload = await response.json();
+  const result = gqlErrors(payload, "productSet");
+  const opErrors = result?.productSetOperation?.userErrors || [];
+  if (opErrors.length) throw new Error(opErrors.map(e => e.message).join("; "));
+  return {
+    operationId: result?.productSetOperation?.id || "",
+    status: result?.productSetOperation?.status || (result?.product ? "COMPLETE" : "CREATED"),
+    product: result?.product || null,
+  };
+}
 
 async function createAutoMugDraft(admin, body) {
   const title = String(body.title || "").trim();
@@ -1094,6 +1124,11 @@ export const action = async ({ request }) => {
     if (intent === "create-auto-lite-draft") {
       const result = await createAutoLiteDraft(admin, body);
       await recordAudit(shop, "product.auto_lite_draft_created", { actor, targetType: "product", targetId: result.product?.id || result.operationId || "pending", title: body.title, variants: 6 }).catch(() => {});
+      return json(request, { ok: true, ...result, variantCount: 6 });
+    }
+    if (intent === "create-auto-poster-draft") {
+      const result = await createAutoPosterDraft(admin, body);
+      await recordAudit(shop, "product.auto_poster_draft_created", { actor, targetType: "product", targetId: result.product?.id || result.operationId || "pending", title: body.title, variants: 6 }).catch(() => {});
       return json(request, { ok: true, ...result, variantCount: 6 });
     }
     if (intent === "create-auto-mug-draft") {
