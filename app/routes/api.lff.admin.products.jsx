@@ -108,38 +108,51 @@ function productPublic(node) {
   };
 }
 
-async function listProducts(admin) {
-  const products = [];
-  let cursor = null;
-  let hasNextPage = true;
-  let safety = 0;
-  while (hasNextPage && safety < 40) {
-    safety += 1;
-    const response = await admin.graphql(
-      `#graphql
-        query LffAdminProducts($after: String) {
-          products(first: 250, after: $after, sortKey: UPDATED_AT, reverse: true) {
-            nodes {
-              id title handle status vendor updatedAt onlineStoreUrl tags totalInventory
-              variantsCount { count }
-              mediaCount { count }
-              variants(first: 1) { nodes { inventoryPolicy } }
-              media(first: 1) { nodes { id alt preview { image { url altText } } } }
-              featuredMedia { id preview { image { url altText } } }
-            }
-            pageInfo { hasNextPage endCursor }
+async function listProductsPage(admin, after = null) {
+  const response = await admin.graphql(
+    `#graphql
+      query LffAdminProductsPage($after: String) {
+        products(first: 100, after: $after, sortKey: ID, reverse: true) {
+          nodes {
+            id title handle status vendor updatedAt onlineStoreUrl tags totalInventory
+            variantsCount { count }
+            mediaCount { count }
+            variants(first: 1) { nodes { inventoryPolicy } }
+            media(first: 1) { nodes { id alt preview { image { url altText } } } }
+            featuredMedia { id preview { image { url altText } } }
           }
-        }`,
-      { variables: { after: cursor } },
-    );
-    const payload = await response.json();
-    if (payload.errors?.length) throw new Error(payload.errors.map((e) => e.message).join("; "));
-    const connection = payload.data?.products;
-    products.push(...(connection?.nodes || []).map(productPublic));
-    hasNextPage = Boolean(connection?.pageInfo?.hasNextPage);
-    cursor = connection?.pageInfo?.endCursor || null;
+          pageInfo { hasNextPage endCursor }
+        }
+      }`,
+    { variables: { after } },
+  );
+  const payload = await response.json();
+  if (payload.errors?.length) throw new Error(payload.errors.map((e) => e.message).join("; "));
+  const connection = payload.data?.products;
+  if (!connection) throw new Error("Shopify no devolvió la lista de productos.");
+  const nextCursor = connection.pageInfo?.hasNextPage ? (connection.pageInfo?.endCursor || "") : "";
+  if (connection.pageInfo?.hasNextPage && !nextCursor) throw new Error("Shopify no devolvió cursor para continuar.");
+  return {
+    products: (connection.nodes || []).map(productPublic),
+    nextCursor,
+    hasNextPage: Boolean(connection.pageInfo?.hasNextPage),
+  };
+}
+
+// Legacy callers remain supported, but the V142 Admin uses paged=1 so
+// a whole catalog never has to be downloaded in a single Render request.
+async function listProducts(admin) {
+  const all = [];
+  const seen = new Set();
+  let cursor = null;
+  for (let i = 0; i < 100; i += 1) {
+    const page = await listProductsPage(admin, cursor);
+    for (const item of page.products) if (!seen.has(item.id)) { seen.add(item.id); all.push(item); }
+    if (!page.hasNextPage) return all;
+    if (!page.nextCursor || page.nextCursor === cursor) throw new Error("La paginación del catálogo se ha detenido; inténtalo de nuevo.");
+    cursor = page.nextCursor;
   }
-  return products;
+  throw new Error("Catálogo demasiado grande para una solicitud. Usa paged=1.");
 }
 
 function markedCoverMedia(nodes = []) {
@@ -496,11 +509,12 @@ async function updateProductDetails(admin, body) {
   const family = String(body.family || "").trim();
   if (!productId) throw new Error("Falta el producto.");
   if (title.length < 2) throw new Error("Escribe un nombre válido para el artículo.");
-  if (!category) throw new Error("Selecciona una categoría.");
-  if (!family) throw new Error("Selecciona una familia / universo.");
+  // Los productos creados fuera del Admin (Shopify/OpenClaw/importación)
+  // pueden carecer de las etiquetas LFF. Permitir guardarlos y clasificarlos después.
   // La marca de modo ligero es interna; no se puede perder al guardar desde Administración.
   const existingResponse = await admin.graphql(`
-    #graphql query LffKeepModeTag($id: ID!) { product(id: $id) { tags } }`,
+    #graphql
+    query LffKeepModeTag($id: ID!) { product(id: $id) { tags } }`,
     { variables: { id: productId } },
   );
   const existingPayload = await existingResponse.json();
@@ -889,7 +903,8 @@ async function assignMediaBatch(admin, body) {
   if (!productId || !items.length) throw new Error("Faltan producto o imágenes para vincular.");
 
   const productModeResponse = await admin.graphql(
-    `#graphql query LffProductMediaMode($id: ID!) { product(id: $id) { tags } }`,
+    `#graphql
+    query LffProductMediaMode($id: ID!) { product(id: $id) { tags } }`,
     { variables: { id: productId } },
   );
   const modePayload = await productModeResponse.json();
@@ -1039,6 +1054,11 @@ export const loader = async ({ request }) => {
     const url = new URL(request.url);
     const productId = url.searchParams.get("productId");
     if (productId) return json(request, { ok: true, product: await getProductDetail(admin, productId), template: templateSummary(), mugTemplate: mugTemplateSummary() });
+    if (url.searchParams.get("paged") === "1") {
+      const cursor = url.searchParams.get("cursor") || null;
+      if (cursor && (cursor.length > 2000 || !/^[\w+\/=-]+$/.test(cursor))) throw new Error("Cursor de productos no válido.");
+      return json(request, { ok: true, ...(await listProductsPage(admin, cursor)), template: cursor ? undefined : templateSummary() });
+    }
     return json(request, { ok: true, products: await listProducts(admin), template: templateSummary(), mugTemplate: mugTemplateSummary() });
   } catch (error) {
     return json(request, { ok: false, error: error.message }, { status: /sesión|autoriz/i.test(error.message) ? 401 : 400 });
