@@ -1,5 +1,6 @@
 import { authenticate, unauthenticated } from "../shopify.server";
 import prisma from "../db.server";
+import { familyCatalogTaxonomy, publicCategoryMatch } from "../lib/catalog-public-taxonomy.server";
 
 // V140 · Cached public catalog by category. PostgreSQL snapshots are shared
 // between browsers, survive Render restarts and never store galleries/variants.
@@ -16,6 +17,7 @@ const RAM_CACHE_MS = 60_000;
 const ram = new Map();
 const refreshing = new Map();
 const refreshRetryAfter = new Map();
+const sharedPublishedScans = new Map();
 
 const norm = (s) => String(s || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
 const slug = (s) => norm(s).replace(/\s+/g, "-");
@@ -52,7 +54,7 @@ async function getShopifyProducts(admin, filter, publicationId) {
   let after = null;
   // No variants or galleries. The published flag is queried in the same page;
   // V139 required an additional Shopify request for each batch of 50 products.
-  for (let page = 0; page < 15; page += 1) {
+  for (let page = 0; page < 35; page += 1) {
     const response = await admin.graphql(`#graphql
       query LffCategoryLightV140($after: String, $filter: String!, $pub: ID!) {
         products(first: 100, after: $after, query: $filter) {
@@ -77,38 +79,36 @@ async function getShopifyProducts(admin, filter, publicationId) {
   return rows;
 }
 
-async function listCategory(admin, category) {
-  const def = CATEGORY[category];
+async function listCategory(admin, category, shop) {
   const publication = await findOnlinePublication(admin);
-  if (!publication?.id) throw new Error("Online Store publication not found");
-  const query = `status:active AND (${def.tags.map(t => `tag:${t}`).join(" OR ")})`;
-  let rows = (await getShopifyProducts(admin, query, publication.id)).filter(p => belongs(p, category));
-  if (!rows.length) {
-    // Compatibility: legacy products may only use LFF_CATEGORY/ LFF_FAMILY tags.
-    rows = (await getShopifyProducts(admin, "status:active", publication.id)).filter(p => belongs(p, category));
+  if (!publication?.id) throw new Error('Online Store publication not found');
+  // Read all ACTIVE products from the publication; some externally uploaded
+  // items are published without LFF_CATEGORY tags. The old query lost them.
+  // Avoid fetching the entire Shopify catalog four times if portals warm together.
+  const cacheKey=`${shop}:${publication.id}`;
+  let scan=sharedPublishedScans.get(cacheKey);
+  if (!scan || scan.expires < Date.now()) {
+    const promise=getShopifyProducts(admin,'status:active',publication.id)
+      .then(rows=>familyCatalogTaxonomy(shop,rows));
+    scan={expires:Date.now()+300_000,promise};
+    sharedPublishedScans.set(cacheKey,scan);
+    promise.catch(()=>{if(sharedPublishedScans.get(cacheKey)===scan)sharedPublishedScans.delete(cacheKey);});
   }
-  const seen = new Set();
-  return rows.filter(p => p?.publishedOnPublication).filter(p => {
-    const key = String(p.id || p.handle || "");
-    if (!key || seen.has(key)) return false;
-    seen.add(key);
-    return true;
-  }).map(p => {
-    const categoryTag = (p.tags || []).find(t => /^LFF_CATEGORY:/i.test(t)) || "";
-    const familyTag = (p.tags || []).find(t => /^LFF_FAMILY:/i.test(t)) || "";
-    const price = p.priceRangeV2?.minVariantPrice || {};
-    return {
-      id: p.id, title: p.title || "Producto", handle: p.handle || "",
-      url: p.onlineStoreUrl || `/products/${p.handle || ""}`,
-      tags: p.tags || [], productType: p.productType || "",
-      category: categoryTag.replace(/^LFF_CATEGORY:/i, "").trim(),
-      family: familyTag.replace(/^LFF_FAMILY:/i, "").trim(),
-      image: p.featuredMedia?.image?.url || "",
-      priceFormatted: money(price.amount || 0, price.currencyCode || "EUR"),
-    };
+  const normalized=await scan.promise;
+  const seen=new Set();
+  return normalized.filter(p=>p.publishedOnPublication && publicCategoryMatch(p,category)).filter(p=>{
+    const key=String(p.id||p.handle||'');if(!key||seen.has(key))return false;
+    seen.add(key);return true;
+  }).map(p=>{
+    const price=p.priceRangeV2?.minVariantPrice||{};
+    return {id:p.id,title:p.title||'Producto',handle:p.handle||'',
+      url:p.onlineStoreUrl||`/products/${p.handle||''}`,
+      tags:p.tags||[],productType:p.productType||'',
+      category:p.category||'',family:p.family||'',
+      image:p.featuredMedia?.image?.url||'',
+      priceFormatted:money(price.amount||0,price.currencyCode||'EUR')};
   });
 }
-
 function snapshotIsValid(row) {
   return row && Array.isArray(row.products);
 }
@@ -129,7 +129,7 @@ async function refresh(shop, category) {
   if (refreshing.has(key)) return refreshing.get(key);
   const promise = (async () => {
     const { admin } = await unauthenticated.admin(shop);
-    const products = await listCategory(admin, category);
+    const products = await listCategory(admin, category, shop);
     const row = await prisma.lffCatalogLiteSnapshot.upsert({
       where: { shop_category: { shop, category } },
       create: { shop, category, products },
@@ -151,7 +151,7 @@ function send(category, row, cacheStatus, status = 200) {
     ok: true, category, products: row.products, cached: cacheStatus !== "fresh",
     cacheStatus, lastUpdated: row.updatedAt,
   }, { status, headers: {
-    "Cache-Control": "public, max-age=45, stale-while-revalidate=120",
+    "Cache-Control": "public, max-age=30",
     "X-LFF-Catalog-Cache": cacheStatus,
   } });
 }
@@ -168,15 +168,11 @@ export const loader = async ({ request }) => {
     if (snapshotIsValid(row)) {
       const age = snapshotInfo(row).ageMs;
       if (age < REFRESH_AFTER_MS) return send(category, row, "persistent");
-      if (age < MAX_STALE_MS) {
-        if ((refreshRetryAfter.get(`${shop}:${category}`) || 0) > Date.now())
-          return send(category, row, "stale-retry-later");
-        // Return instantly, even for a new browser. Refresh without blocking it.
-        void refresh(shop, category).catch(error => {
-          console.error("[LFF V140 refresh]", category, error);
-        });
-        return send(category, row, "stale-refreshing");
-      }
+      // A successful publication in Shopify must not stay hidden for hours.
+      // Wait for one shared refresh every 5 minutes; during API outages keep
+      // the last known good snapshot instead of displaying an empty catalog.
+      if (age < MAX_STALE_MS && (refreshRetryAfter.get(`${shop}:${category}`) || 0) > Date.now())
+        return send(category, row, "stale-retry-later");
     }
     try {
       row = await refresh(shop, category);

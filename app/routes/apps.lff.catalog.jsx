@@ -1,4 +1,5 @@
 import { authenticate, unauthenticated } from "../shopify.server";
+import { familyCatalogTaxonomy } from "../lib/catalog-public-taxonomy.server";
 
 function safeMoney(amount, currencyCode = "EUR") {
   const value = Number(amount || 0);
@@ -100,7 +101,7 @@ async function loadCatalog(admin) {
 
   const products = [];
   let after = null;
-  for (let page = 0; page < 10; page += 1) {
+  for (let page = 0; page < 50; page += 1) {
     const response = await admin.graphql(`#graphql
       query LffPublicCatalog($after: String, $publicationId: ID!) {
         products(first: 100, after: $after, query: "status:active") {
@@ -162,7 +163,7 @@ export const loader = async ({ request }) => {
     const shop = url.searchParams.get("shop") || process.env.SHOPIFY_SHOP_DOMAIN;
     if (!shop) return Response.json({ ok: false, error: "Shop ausente." }, { status: 400 });
     const { admin } = await unauthenticated.admin(shop);
-    const allProducts = await loadCatalogCached(admin);
+    const allProducts = await familyCatalogTaxonomy(shop, await loadCatalogCached(admin));
     const familyKeys = requestedFamilyKeys(url);
     const products = familyKeys.length
       ? allProducts.filter((product) => productMatchesFamily(product, familyKeys))
