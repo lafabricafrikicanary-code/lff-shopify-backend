@@ -34,16 +34,16 @@ function validUrl(value) {
   catch { return false; }
 }
 async function waitForImage(admin, id) {
-  for (let i = 0; i < 15; i++) {
+  for (let i = 0; i < 50; i++) {
     const d = await graph(admin,
       `query LffShowcaseFile($id:ID!){node(id:$id){... on MediaImage{id fileStatus image{url}}}}`,
       { id });
     const file = d?.node;
     if (file?.image?.url) return file.image.url;
     if (file?.fileStatus === "FAILED") throw new Error("Shopify no pudo procesar el PNG.");
-    await new Promise(resolve => setTimeout(resolve, 400));
+    await new Promise(resolve => setTimeout(resolve, 600));
   }
-  throw new Error("La imagen se ha subido, pero Shopify aún la está procesando. Vuelve a intentarlo en unos segundos.");
+  throw new Error("Shopify ha recibido la imagen, pero su procesamiento está tardando más de lo habitual. Vuelve a intentarlo más tarde.");
 }
 export const loader = async ({ request }) => {
   // Browsers preflight cross-origin GET requests with Authorization.
@@ -73,7 +73,10 @@ export const action = async ({ request }) => {
     if (mode !== "upload") throw new Error("Acción no admitida.");
     const file = data.get("file");
     if (!file || !file.size || !file.arrayBuffer) throw new Error("Selecciona el PNG transparente.");
-    if (file.type !== "image/png" || !String(file.name).toLowerCase().endsWith(".png")) throw new Error("La imagen debe ser PNG transparente.");
+    if ((file.type && file.type !== "image/png") || !String(file.name).toLowerCase().endsWith(".png")) throw new Error("La imagen debe ser PNG transparente.");
+    const header = new Uint8Array(await file.slice(0, 8).arrayBuffer());
+    const signature = [137,80,78,71,13,10,26,10];
+    if (signature.some((byte, i) => header[i] !== byte)) throw new Error("Este archivo no es un PNG auténtico.");
     if (file.size > LIMIT) throw new Error("Máximo 8 MB por PNG. Usa una versión optimizada.");
     // Limit server processing: Shopify receives original bytes directly.
     const current = await readImage(admin, productId);
