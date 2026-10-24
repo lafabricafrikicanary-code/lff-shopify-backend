@@ -36,6 +36,64 @@ async function onlineStorePublication(admin) {
   return rows.find((p) => /online store|tienda online/i.test(String(p.name || ""))) || rows[0] || null;
 }
 
+
+function normalizeFamilyValue(value = "") {
+  return String(value || "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/[×&]/g, " x ")
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim()
+    .replace(/\s+/g, " ");
+}
+
+function requestedFamilyKeys(url) {
+  const values = [
+    url.searchParams.get("family"),
+    url.searchParams.get("family_id"),
+    ...url.searchParams.getAll("alias"),
+  ].filter(Boolean);
+  return [...new Set(values.map(normalizeFamilyValue).filter(Boolean))];
+}
+
+function productMatchesFamily(product, keys = []) {
+  if (!keys.length) return true;
+  const family = normalizeFamilyValue(product?.family || "");
+  if (family && keys.some((key) => family === key || family.includes(key) || key.includes(family))) return true;
+
+  const tags = Array.isArray(product?.tags) ? product.tags : [];
+  for (const raw of tags) {
+    const tag = String(raw || "");
+    if (/^LFF_FAMILY:/i.test(tag)) {
+      const taggedFamily = normalizeFamilyValue(tag.replace(/^LFF_FAMILY:/i, ""));
+      if (taggedFamily && keys.some((key) => taggedFamily === key || taggedFamily.includes(key) || key.includes(taggedFamily))) return true;
+    }
+    const normalizedTag = normalizeFamilyValue(tag);
+    if (normalizedTag && keys.some((key) => normalizedTag === key)) return true;
+  }
+  return false;
+}
+
+const CATALOG_CACHE_MS = 60_000;
+let catalogCache = { expiresAt: 0, products: null, pending: null };
+
+async function loadCatalogCached(admin) {
+  const now = Date.now();
+  if (Array.isArray(catalogCache.products) && catalogCache.expiresAt > now) return catalogCache.products;
+  if (catalogCache.pending) return catalogCache.pending;
+  catalogCache.pending = loadCatalog(admin)
+    .then((products) => {
+      catalogCache.products = products;
+      catalogCache.expiresAt = Date.now() + CATALOG_CACHE_MS;
+      return products;
+    })
+    .finally(() => {
+      catalogCache.pending = null;
+    });
+  return catalogCache.pending;
+}
+
 async function loadCatalog(admin) {
   const publication = await onlineStorePublication(admin);
   if (!publication) throw new Error("No se encontró la publicación de Tienda online.");
@@ -52,6 +110,7 @@ async function loadCatalog(admin) {
             handle
             status
             tags
+            productType
             onlineStoreUrl
             totalInventory
             publishedOnPublication(publicationId: $publicationId)
@@ -79,6 +138,7 @@ async function loadCatalog(admin) {
         handle: p.handle || "",
         url: p.onlineStoreUrl || (p.handle ? `/products/${p.handle}` : "#"),
         tags: Array.isArray(p.tags) ? p.tags : [],
+        productType: p.productType || "",
         category: taxonomy.category,
         family: taxonomy.family,
         image: imageFromMedia(p.featuredMedia),
@@ -102,9 +162,21 @@ export const loader = async ({ request }) => {
     const shop = url.searchParams.get("shop") || process.env.SHOPIFY_SHOP_DOMAIN;
     if (!shop) return Response.json({ ok: false, error: "Shop ausente." }, { status: 400 });
     const { admin } = await unauthenticated.admin(shop);
-    const products = await loadCatalog(admin);
+    const allProducts = await loadCatalogCached(admin);
+    const familyKeys = requestedFamilyKeys(url);
+    const products = familyKeys.length
+      ? allProducts.filter((product) => productMatchesFamily(product, familyKeys))
+      : allProducts;
     return Response.json(
-      { ok: true, products, count: products.length, source: "admin-online-store-publication" },
+      {
+        ok: true,
+        products,
+        count: products.length,
+        totalCatalog: allProducts.length,
+        filteredByFamily: familyKeys.length > 0,
+        familyKeys,
+        source: familyKeys.length ? "admin-online-store-publication-family" : "admin-online-store-publication",
+      },
       { headers: { "Cache-Control": "public, max-age=30, stale-while-revalidate=120" } },
     );
   } catch (error) {

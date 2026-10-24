@@ -340,6 +340,6 @@ export function classifyTrafficSource(body = {}) {
   if (["commercials", "web", "companies", "marketing"].includes(explicit)) return explicit;
   if (body.commercialCode) return "commercials";
   if (body.companyId || /b2b|empresa|tienda/i.test(String(body.medium || ""))) return "companies";
-  if (body.campaign || /utm|ads|meta|google|instagram|tiktok|newsletter|email/i.test(`${body.medium || ""} ${body.referrer || ""}`)) return "marketing";
+  if (body.campaign || body.sourceDetail || /utm|ads|meta|google|instagram|tiktok|facebook|youtube|pinterest|twitter|x\.com|newsletter|email/i.test(`${body.medium || ""} ${body.referrer || ""}`)) return "marketing";
   return "web";
 }

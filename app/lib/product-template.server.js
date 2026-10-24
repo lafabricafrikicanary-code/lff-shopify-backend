@@ -136,31 +136,31 @@ export function templateSummary() {
 }
 
 
-// V116 POSTER: tres tamaños y dos orientaciones. No afecta a ropa ni tazas.
+// V117 PÓSTER: la orientación la decide quien crea el producto, NO el comprador.
+// Se mantienen únicamente las tres variantes de tamaño; no migrar automáticamente productos antiguos.
 export const LFF_POSTER_FORMATS = [
   { name: "15 × 20 cm", code: "15X20", widthCm: 15, heightCm: 20, price: "1.00" },
   { name: "22,5 × 32 cm", code: "22X32", widthCm: 22.5, heightCm: 32, price: "2.00" },
   { name: "32 × 45 cm", code: "32X45", widthCm: 32, heightCm: 45, price: "3.00" },
 ];
-export function buildLffPosterTemplate({ title, skuPrefix, vendor = "La Fábrica Friki", tags = [], descriptionHtml = "" }) {
+export function buildLffPosterTemplate({ title, skuPrefix, vendor = "La Fábrica Friki", tags = [], descriptionHtml = "", orientation = "vertical" }) {
+  const selectedOrientation = String(orientation || "").toLowerCase();
+  if (!["vertical", "horizontal"].includes(selectedOrientation)) throw new Error("Orientación del póster no válida.");
   const prefix = normalizeSkuPrefix(skuPrefix || title, "LFF-POSTER");
   return {
     title: String(title || "").trim(),
     descriptionHtml: String(descriptionHtml || ""),
     vendor: String(vendor || "La Fábrica Friki").trim(),
     productType: "Póster LFF",
-    tags: [...new Set(["LFF_AUTODRAFT", "LFF_PRODUCT_TYPE:POSTER", ...tags])],
+    tags: [...new Set(["LFF_AUTODRAFT", "LFF_PRODUCT_TYPE:POSTER", `LFF_POSTER_ORIENTATION:${selectedOrientation.toUpperCase()}`, ...tags])],
     status: "DRAFT",
     productOptions: [
       { name: "Tamaño", position: 1, values: LFF_POSTER_FORMATS.map(({ name }) => ({ name })) },
-      { name: "Orientación", position: 2, values: [{ name: "Vertical" }, { name: "Horizontal" }] },
     ],
-    variants: LFF_POSTER_FORMATS.flatMap(({ name, code, price }) => ["Vertical", "Horizontal"].map(orientation => ({
-      optionValues: [{ optionName: "Tamaño", name }, { optionName: "Orientación", name: orientation }],
-      sku: `${prefix}-PST-${code}-${orientation === "Vertical" ? "V" : "H"}`,
+    variants: LFF_POSTER_FORMATS.map(({ name, code, price }) => ({
+      optionValues: [{ optionName: "Tamaño", name }],
+      sku: `${prefix}-PST-${code}-${selectedOrientation === "vertical" ? "V" : "H"}`,
       price, taxable: true, inventoryPolicy: "CONTINUE",
-    }))),
+    })),
   };
 }
-
-

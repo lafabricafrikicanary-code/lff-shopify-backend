@@ -29,11 +29,7 @@ function actor(auth) {
 }
 
 function ownerOnly(auth) {
-  // V116: ambos administradores designados tienen los mismos permisos operativos.
-  const name = String(auth?.user?.username || "").trim().toLocaleLowerCase("es-ES");
-  if (!auth?.user?.enabled || !["alejandro", "gabriel"].includes(name)) {
-    throw new Error("Solo los administradores autorizados pueden realizar esta acción.");
-  }
+  if (String(auth?.user?.role || "").toLowerCase() !== "owner") throw new Error("Solo Alejandro puede realizar esta acción.");
 }
 
 function reviewPublic(row) {

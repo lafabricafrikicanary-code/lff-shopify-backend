@@ -57,7 +57,7 @@ async function getShopifyProducts(admin, filter, publicationId) {
       query LffCategoryLightV140($after: String, $filter: String!, $pub: ID!) {
         products(first: 100, after: $after, query: $filter) {
           nodes {
-            id title handle status tags onlineStoreUrl
+            id title handle status tags productType onlineStoreUrl
             publishedOnPublication(publicationId: $pub)
             featuredMedia { ... on MediaImage { image { url(transform: {maxWidth: 520}) } } }
             priceRangeV2 { minVariantPrice { amount currencyCode } }
@@ -100,7 +100,7 @@ async function listCategory(admin, category) {
     return {
       id: p.id, title: p.title || "Producto", handle: p.handle || "",
       url: p.onlineStoreUrl || `/products/${p.handle || ""}`,
-      tags: p.tags || [],
+      tags: p.tags || [], productType: p.productType || "",
       category: categoryTag.replace(/^LFF_CATEGORY:/i, "").trim(),
       family: familyTag.replace(/^LFF_FAMILY:/i, "").trim(),
       image: p.featuredMedia?.image?.url || "",

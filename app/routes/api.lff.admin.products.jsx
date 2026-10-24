@@ -13,6 +13,7 @@ import {
   buildLffLiteApparelTemplate,
   buildLffMugProductTemplate,
   buildLffPosterTemplate,
+  LFF_POSTER_FORMATS,
   templateSummary,
   mugTemplateSummary,
   LFF_MODEL_PRICES,
@@ -454,6 +455,7 @@ async function createAutoPosterDraft(admin, body) {
   const input = buildLffPosterTemplate({
     title: title.slice(0, 255), skuPrefix: body.skuPrefix || title,
     vendor: body.vendor || "La Fábrica Friki",
+    orientation: body.orientation,
   });
   const response = await admin.graphql(
     `#graphql
@@ -551,11 +553,10 @@ async function updateProductDetails(admin, body) {
   const existingPayload = await existingResponse.json();
   if (existingPayload.errors?.length) throw new Error(existingPayload.errors.map((e) => e.message).join("; "));
   const existingTags = existingPayload.data?.product?.tags || [];
-  const internal = existingTags.includes("LFF_LIGHT_OPTIONS_V1") ? ["LFF_LIGHT_OPTIONS_V1"] : [];
-  const tags = [...new Set([...organizationalTags(category, family), ...cleanTags(body.tags), ...internal])].slice(0, 50);
-  if (internal.length && !tags.includes(internal[0])) {
-    tags[49] = internal[0];
-  }
+  // Conservar las etiquetas técnicas al guardar desde Administración: sin ellas,
+  // los pósteres perderían su tipo/orientación y el filtro por producto fallaría.
+  const internal = existingTags.filter(t => /^(?:LFF_LIGHT_OPTIONS_V1|LFF_PRODUCT_TYPE:|LFF_POSTER_ORIENTATION:)/i.test(String(t)));
+  const tags = [...new Set([...internal, ...organizationalTags(category, family), ...cleanTags(body.tags)])].slice(0, 50);
   const product = {
     id: productId,
     title: title.slice(0, 255),
@@ -1076,6 +1077,37 @@ async function assignMedia(admin, body) {
   return { assigned: ids.length };
 }
 
+// Asocia cada foto con su tamaño, sin exponer la orientación como variante.
+async function assignPosterSizeMedia(admin, body) {
+  const productId = String(body.productId || "");
+  const mediaId = String(body.mediaId || "");
+  const size = String(body.size || "").trim();
+  if (!productId || !mediaId || !LFF_POSTER_FORMATS.some(f => f.name === size)) throw new Error("Tamaño o imagen de póster inválidos.");
+  const response = await admin.graphql(`#graphql
+    query LffPosterMediaVariants($id: ID!) {
+      product(id: $id) {
+        tags
+        variants(first: 40) { nodes { id selectedOptions { name value } } }
+      }
+    }`, { variables: { id: productId } });
+  const payload = await response.json();
+  if (payload.errors?.length) throw new Error(payload.errors.map(e => e.message).join("; "));
+  const product = payload.data?.product;
+  if (!product?.tags?.includes("LFF_PRODUCT_TYPE:POSTER")) throw new Error("El producto no es un póster LFF.");
+  const matches = (product.variants?.nodes || []).filter(v => (v.selectedOptions || []).some(o => o.name.toLowerCase() === "tamaño" && o.value === size));
+  if (!matches.length) throw new Error("No existe una variante para ese tamaño.");
+  const variants = matches.map(v => ({ id: v.id, mediaId }));
+  const response2 = await admin.graphql(`#graphql
+    mutation LffPosterSizeMedia($productId: ID!, $variants: [ProductVariantsBulkInput!]!) {
+      productVariantsBulkUpdate(productId: $productId, variants: $variants, allowPartialUpdates: false) {
+        userErrors { field message }
+      }
+    }`, { variables: { productId, variants } });
+  const assigned = await response2.json();
+  gqlErrors(assigned, "productVariantsBulkUpdate");
+  return { assigned: variants.length, size };
+}
+
 export const loader = async ({ request }) => {
   if (request.method === "OPTIONS") return new Response(null, { headers: corsHeaders(request) });
   try {
@@ -1128,8 +1160,8 @@ export const action = async ({ request }) => {
     }
     if (intent === "create-auto-poster-draft") {
       const result = await createAutoPosterDraft(admin, body);
-      await recordAudit(shop, "product.auto_poster_draft_created", { actor, targetType: "product", targetId: result.product?.id || result.operationId || "pending", title: body.title, variants: 6 }).catch(() => {});
-      return json(request, { ok: true, ...result, variantCount: 6 });
+      await recordAudit(shop, "product.auto_poster_draft_created", { actor, targetType: "product", targetId: result.product?.id || result.operationId || "pending", title: body.title, variants: 3 }).catch(() => {});
+      return json(request, { ok: true, ...result, variantCount: 3 });
     }
     if (intent === "create-auto-mug-draft") {
       const result = await createAutoMugDraft(admin, body);
@@ -1158,6 +1190,11 @@ export const action = async ({ request }) => {
     if (intent === "assign-media") {
       const result = await assignMedia(admin, body);
       await recordAudit(shop, "product.media_assigned", { actor, targetType: "product", targetId: body.productId, mediaId: body.mediaId, model: body.model, color: body.color, assigned: result.assigned }).catch(() => {});
+      return json(request, { ok: true, ...result });
+    }
+    if (intent === "assign-poster-size-media") {
+      const result = await assignPosterSizeMedia(admin, body);
+      await recordAudit(shop, "product.poster_media_assigned", { actor, targetType: "product", targetId: body.productId, mediaId: body.mediaId, size: body.size }).catch(() => {});
       return json(request, { ok: true, ...result });
     }
     if (intent === "set-cover") {
