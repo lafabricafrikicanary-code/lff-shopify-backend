@@ -45,6 +45,11 @@ async function waitForImage(admin, id) {
   throw new Error("La imagen se ha subido, pero Shopify aún la está procesando. Vuelve a intentarlo en unos segundos.");
 }
 export const loader = async ({ request }) => {
+  // Browsers preflight cross-origin GET requests with Authorization.
+  // A 400 here causes Safari/Chrome to show “Load failed” before the file is sent.
+  if (request.method === "OPTIONS") {
+    return new Response(null, { status: 204, headers: { ...corsHeaders(request), "Cache-Control": "no-store" } });
+  }
   try {
     await requireAdminSession(request);
     const id = new URL(request.url).searchParams.get("productId") || "";
