@@ -60,6 +60,7 @@ async function getShopifyProducts(admin, filter, publicationId) {
         products(first: 100, after: $after, query: $filter) {
           nodes {
             id title handle status tags productType onlineStoreUrl
+            metafield(namespace: "lff", key: "showcase_png") { value }
             publishedOnPublication(publicationId: $pub)
             featuredMedia { ... on MediaImage { image { url(transform: {maxWidth: 520}) } } }
             priceRangeV2 { minVariantPrice { amount currencyCode } }
@@ -105,7 +106,7 @@ async function listCategory(admin, category, shop) {
       url:p.onlineStoreUrl||`/products/${p.handle||''}`,
       tags:p.tags||[],productType:p.productType||'',
       category:p.category||'',family:p.family||'',
-      image:p.featuredMedia?.image?.url||'',
+      image:(/^https:\/\/cdn\.shopify\.com\//.test(String(p.metafield?.value||""))?p.metafield.value:"") || p.featuredMedia?.image?.url||'',
       priceFormatted:money(price.amount||0,price.currencyCode||'EUR')};
   });
 }
