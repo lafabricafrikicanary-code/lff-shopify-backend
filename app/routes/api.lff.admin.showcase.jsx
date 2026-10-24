@@ -17,12 +17,13 @@ async function graph(admin, query, variables, field) {
   const res = await admin.graphql(query, { variables });
   const body = await res.json();
   const errs = [...(body.errors || []), ...(field ? body.data?.[field]?.userErrors || [] : [])];
+  if (!res.ok) throw new Error("Shopify respondió HTTP " + res.status + ": " + (errs[0]?.message || "Error de Shopify"));
   if (errs.length) throw new Error(errs.map(e => e.message).join("; "));
   return field ? body.data?.[field] : body.data;
 }
 async function readImage(admin, productId) {
   const d = await graph(admin,
-    `#graphql query LffShowcaseImage($id:ID!){product(id:$id){id title metafield(namespace:"lff",key:"showcase_png"){value}}}`,
+    `query LffShowcaseImage($id:ID!){product(id:$id){id title metafield(namespace:"lff",key:"showcase_png"){value}}}`,
     { id: productId });
   if (!d?.product) throw new Error("El producto no existe.");
   return d.product.metafield?.value || "";
@@ -35,7 +36,7 @@ function validUrl(value) {
 async function waitForImage(admin, id) {
   for (let i = 0; i < 15; i++) {
     const d = await graph(admin,
-      `#graphql query LffShowcaseFile($id:ID!){node(id:$id){... on MediaImage{id fileStatus image{url}}}}`,
+      `query LffShowcaseFile($id:ID!){node(id:$id){... on MediaImage{id fileStatus image{url}}}}`,
       { id });
     const file = d?.node;
     if (file?.image?.url) return file.image.url;
@@ -56,7 +57,7 @@ export const loader = async ({ request }) => {
     if (!validId(id)) throw new Error("ID de producto no válido.");
     const url = await readImage(await client(), id);
     return json(request, { ok:true, url });
-  } catch (err) { return json(request, { ok:false, error: err.message }, { status:400 }); }
+  } catch (err) { console.error("[LFF SHOWCASE GET]", err); return json(request, { ok:false, error: err.message }, { status:400 }); }
 };
 export const action = async ({ request }) => {
   if (request.method === "OPTIONS") return new Response(null, { headers:corsHeaders(request) });
@@ -77,8 +78,8 @@ export const action = async ({ request }) => {
     // Limit server processing: Shopify receives original bytes directly.
     const current = await readImage(admin, productId);
     const staged = await graph(admin,
-      `#graphql mutation LffShowcaseStage($input:[StagedUploadInput!]!){stagedUploadsCreate(input:$input){stagedTargets{url resourceUrl parameters{name value}}userErrors{field message}}}`,
-      {input:[{filename:file.name, mimeType:"image/png", resource:"SHOP_IMAGE", httpMethod:"POST"}]}, "stagedUploadsCreate");
+      `mutation LffShowcaseStage($input:[StagedUploadInput!]!){stagedUploadsCreate(input:$input){stagedTargets{url resourceUrl parameters{name value}}userErrors{field message}}}`,
+      {input:[{filename:file.name, mimeType:"image/png", resource:"FILE", fileSize:String(file.size), httpMethod:"POST"}]}, "stagedUploadsCreate");
     const target = staged?.stagedTargets?.[0];
     if (!target) throw new Error("Shopify no devolvió una URL de carga.");
     const fd = new FormData();
@@ -87,19 +88,19 @@ export const action = async ({ request }) => {
     const transfer = await fetch(target.url,{method:"POST",body:fd});
     if (!transfer.ok) throw new Error("La transferencia del PNG falló: "+transfer.status);
     const created = await graph(admin,
-      `#graphql mutation LffShowcaseFileCreate($files:[FileCreateInput!]!){fileCreate(files:$files){files{id fileStatus ... on MediaImage{image{url}}}userErrors{field message code}}}`,
+      `mutation LffShowcaseFileCreate($files:[FileCreateInput!]!){fileCreate(files:$files){files{id fileStatus ... on MediaImage{image{url}}}userErrors{field message code}}}`,
       {files:[{contentType:"IMAGE", originalSource:target.resourceUrl,alt:"Escaparate LFF | "+productId}]}, "fileCreate");
     const media = created?.files?.[0];
     if (!media?.id) throw new Error("Shopify no confirmó la imagen.");
     const url = media.image?.url || await waitForImage(admin, media.id);
     if (!validUrl(url)) throw new Error("Shopify devolvió una URL no válida.");
     await graph(admin,
-      `#graphql mutation LffShowcaseMeta($input:[MetafieldsSetInput!]!){metafieldsSet(metafields:$input){userErrors{field message}}}`,
+      `mutation LffShowcaseMeta($input:[MetafieldsSetInput!]!){metafieldsSet(metafields:$input){userErrors{field message}}}`,
       {input:[{ownerId:productId,namespace:KEY.namespace,key:KEY.key,type:"url",value:url}]},"metafieldsSet");
     await recordAudit(shopDomain(),"product.showcase_uploaded",{
       actor:auth?.user?.displayName || auth?.user?.username || "Admin",
       targetType:"product",targetId:productId, previous:Boolean(current)
     }).catch(()=>{});
     return json(request,{ok:true,url});
-  } catch (err) { return json(request,{ok:false,error:err.message},{status:400}); }
+  } catch (err) { console.error("[LFF SHOWCASE UPLOAD]", err); return json(request,{ok:false,error:err.message},{status:400}); }
 };
