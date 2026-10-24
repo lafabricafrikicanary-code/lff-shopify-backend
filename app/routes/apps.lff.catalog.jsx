@@ -76,11 +76,12 @@ function productMatchesFamily(product, keys = []) {
   return false;
 }
 
-const CATALOG_CACHE_MS = 60_000;
+const CATALOG_CACHE_MS = 20_000;
 let catalogCache = { expiresAt: 0, products: null, pending: null };
 
-async function loadCatalogCached(admin) {
+async function loadCatalogCached(admin, { force = false } = {}) {
   const now = Date.now();
+  if (force) { catalogCache.expiresAt = 0; catalogCache.products = null; }
   if (Array.isArray(catalogCache.products) && catalogCache.expiresAt > now) return catalogCache.products;
   if (catalogCache.pending) return catalogCache.pending;
   catalogCache.pending = loadCatalog(admin)
@@ -163,7 +164,8 @@ export const loader = async ({ request }) => {
     const shop = url.searchParams.get("shop") || process.env.SHOPIFY_SHOP_DOMAIN;
     if (!shop) return Response.json({ ok: false, error: "Shop ausente." }, { status: 400 });
     const { admin } = await unauthenticated.admin(shop);
-    const allProducts = await familyCatalogTaxonomy(shop, await loadCatalogCached(admin));
+    const forceRefresh = ["1", "true", "yes"].includes(String(url.searchParams.get("refresh") || "").toLowerCase());
+    const allProducts = await familyCatalogTaxonomy(shop, await loadCatalogCached(admin, { force: forceRefresh }));
     const familyKeys = requestedFamilyKeys(url);
     const products = familyKeys.length
       ? allProducts.filter((product) => productMatchesFamily(product, familyKeys))
@@ -177,6 +179,7 @@ export const loader = async ({ request }) => {
         filteredByFamily: familyKeys.length > 0,
         familyKeys,
         source: familyKeys.length ? "admin-online-store-publication-family" : "admin-online-store-publication",
+        forcedRefresh: forceRefresh,
       },
       { headers: { "Cache-Control": "public, max-age=30, stale-while-revalidate=120" } },
     );
