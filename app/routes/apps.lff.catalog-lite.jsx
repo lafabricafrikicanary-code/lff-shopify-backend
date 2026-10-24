@@ -11,9 +11,9 @@ const CATEGORY = {
   multiverse: { tags: ["multiusos", "multiverso", "multiverse", "multiusos-multiverso"], names: ["multiusos", "multiverso", "multiverse", "multiusos multiverso"] },
 };
 
-const REFRESH_AFTER_MS = 5 * 60_000; // periodic Shopify synchronization
+const REFRESH_AFTER_MS = 60_000; // periodic Shopify synchronization
 const MAX_STALE_MS = 6 * 60 * 60_000;  // don't silently serve very old stock indefinitely
-const RAM_CACHE_MS = 60_000;
+const RAM_CACHE_MS = 20_000;
 const ram = new Map();
 const refreshing = new Map();
 const refreshRetryAfter = new Map();
@@ -90,7 +90,7 @@ async function listCategory(admin, category, shop) {
   if (!scan || scan.expires < Date.now()) {
     const promise=getShopifyProducts(admin,'status:active',publication.id)
       .then(rows=>familyCatalogTaxonomy(shop,rows));
-    scan={expires:Date.now()+300_000,promise};
+    scan={expires:Date.now()+60_000,promise};
     sharedPublishedScans.set(cacheKey,scan);
     promise.catch(()=>{if(sharedPublishedScans.get(cacheKey)===scan)sharedPublishedScans.delete(cacheKey);});
   }
@@ -164,7 +164,8 @@ export const loader = async ({ request }) => {
     if (!CATEGORY[category]) return Response.json({ ok: false, error: "Categoría desconocida" }, { status: 400 });
     const shop = process.env.SHOPIFY_SHOP_DOMAIN || url.searchParams.get("shop");
     if (!shop) return Response.json({ ok: false, error: "Tienda no configurada" }, { status: 400 });
-    let row = await readSnapshot(shop, category);
+    const forceRefresh = ["1", "true", "yes"].includes(String(url.searchParams.get("refresh") || "").toLowerCase());
+    let row = forceRefresh ? null : await readSnapshot(shop, category);
     if (snapshotIsValid(row)) {
       const age = snapshotInfo(row).ageMs;
       if (age < REFRESH_AFTER_MS) return send(category, row, "persistent");
@@ -176,7 +177,7 @@ export const loader = async ({ request }) => {
     }
     try {
       row = await refresh(shop, category);
-      return send(category, row, "fresh");
+      return send(category, row, forceRefresh ? "fresh-forced" : "fresh");
     } catch (error) {
       // Keep the last known working catalog available during Shopify outages.
       if (snapshotIsValid(row)) {
