@@ -107,6 +107,7 @@ async function listCategory(admin, category, shop) {
       tags:p.tags||[],productType:p.productType||'',
       category:p.category||'',family:p.family||'',
       image:(/^https:\/\/cdn\.shopify\.com\//.test(String(p.metafield?.value||""))?p.metafield.value:"") || p.featuredMedia?.image?.url||'',
+      showcaseImage:/^https:\/\/cdn\.shopify\.com\//.test(String(p.metafield?.value||"")),
       priceFormatted:money(price.amount||0,price.currencyCode||'EUR')};
   });
 }
