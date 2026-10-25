@@ -18,6 +18,27 @@ const ram = new Map();
 const refreshing = new Map();
 const refreshRetryAfter = new Map();
 const sharedPublishedScans = new Map();
+const crossCategoryRefreshAt = new Map();
+// V182: browsing any portal keeps the other three cached catalogs current too.
+// This operates ONLY on the server and reuses the same 750-product Shopify scan;
+// it never makes shoppers download the full catalog.
+function warmMissingCategories(shop,openedCategory){
+  const now=Date.now(),last=crossCategoryRefreshAt.get(shop)||0;
+  if(now-last<8*60_000)return;
+  crossCategoryRefreshAt.set(shop,now);
+  const others=Object.keys(CATEGORY).filter(name=>name!==openedCategory);
+  void Promise.allSettled(others.map(async name=>{
+    const cached=await readSnapshot(shop,name);
+    const stale=!snapshotIsValid(cached)||snapshotInfo(cached).ageMs>=REFRESH_AFTER_MS;
+    if(!stale)return;
+    const key=shop+":"+name;
+    if(refreshing.has(key)||(refreshRetryAfter.get(key)||0)>Date.now())return;
+    await refresh(shop,name);
+  })).then(results=>{
+    for(const item of results)if(item.status==="rejected")
+      console.warn("[LFF V182 category warm]",item.reason?.message||item.reason);
+  });
+}
 
 const norm = (s) => String(s || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
 const slug = (s) => norm(s).replace(/\s+/g, "-");
@@ -254,6 +275,7 @@ export const loader = async ({ request }) => {
     if (!CATEGORY[category]) return Response.json({ ok: false, error: "Categoría desconocida" }, { status: 400 });
     const shop = process.env.SHOPIFY_SHOP_DOMAIN || url.searchParams.get("shop");
     if (!shop) return Response.json({ ok: false, error: "Tienda no configurada" }, { status: 400 });
+    warmMissingCategories(shop,category);
     const forceRefresh = ["1", "true", "yes"].includes(String(url.searchParams.get("refresh") || "").toLowerCase());
     const family=String(url.searchParams.get("family")||"").trim();
     if(family.length>120)return Response.json({ok:false,error:"Familia no válida"},{status:400});
