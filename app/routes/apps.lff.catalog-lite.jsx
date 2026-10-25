@@ -61,6 +61,9 @@ async function getShopifyProducts(admin, filter, publicationId) {
           nodes {
             id title handle status tags productType onlineStoreUrl
             metafield(namespace: "lff", key: "showcase_png") { value }
+            showcaseVideo:metafield(namespace:"lff",key:"showcase_video"){
+              reference{... on Video{id fileStatus sources{url mimeType format}}}
+            }
             publishedOnPublication(publicationId: $pub)
             featuredMedia { ... on MediaImage { image { url(transform: {maxWidth: 520}) } } }
             priceRangeV2 { minVariantPrice { amount currencyCode } }
@@ -108,6 +111,8 @@ async function listCategory(admin, category, shop) {
       category:p.category||'',family:p.family||'',
       image:(/^https:\/\/cdn\.shopify\.com\//.test(String(p.metafield?.value||""))?p.metafield.value:"") || p.featuredMedia?.image?.url||'',
       showcaseImage:/^https:\/\/cdn\.shopify\.com\//.test(String(p.metafield?.value||"")),
+      showcaseVideo:(p.showcaseVideo?.reference?.fileStatus==="READY" ?
+        p.showcaseVideo.reference.sources?.find(x=>x.mimeType==="video/mp4"||x.format==="mp4")?.url : "") || "",
       priceFormatted:money(price.amount||0,price.currencyCode||'EUR')};
   });
 }
