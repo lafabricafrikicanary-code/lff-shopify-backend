@@ -108,6 +108,7 @@ function productPublic(node) {
     tags: node.tags || [],
     image: preview?.url || "",
     onlineStoreUrl: node.onlineStoreUrl || "",
+    showcaseImage: /^https:\/\/cdn\.shopify\.com\//.test(String(node.metafield?.value || "")),
   };
 }
 
@@ -118,6 +119,7 @@ async function listProductsPage(admin, after = null) {
         products(first: 100, after: $after, sortKey: ID, reverse: true) {
           nodes {
             id title handle status vendor productType updatedAt onlineStoreUrl tags totalInventory
+            metafield(namespace: "lff", key: "showcase_png") { value }
             variantsCount { count }
             mediaCount { count }
             variants(first: 1) { nodes { inventoryPolicy } }
