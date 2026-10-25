@@ -622,7 +622,7 @@ async function updateGeneratedSkuPrefix(admin, body) {
           product{id} userErrors{field message}
         }
       }`,
-      {variables:{productId:id,variants:updates.slice(i,i+100).map(v=>({id:v.id,sku:v.sku}))}});
+      {variables:{productId:id,variants:updates.slice(i,i+100).map(v=>({id:v.id,inventoryItem:{sku:v.sku}}))}});
     const result=await response.json();
     gqlErrors(result,"productVariantsBulkUpdate");
   }
