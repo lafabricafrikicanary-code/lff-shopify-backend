@@ -87,6 +87,9 @@ async function getShopifyProducts(admin, filter, publicationId) {
             }
             publishedOnPublication(publicationId: $pub)
             featuredMedia { ... on MediaImage { image { url(transform: {maxWidth: 520}) } } }
+            // Even when VIDEO is in position 0, fetch one static product photo:
+            // Safari reduce-motion, failed video and image fallbacks need it.
+            media(first: 2) { nodes { ... on MediaImage { image { url(transform: {maxWidth: 520}) } } } }
             priceRangeV2 { minVariantPrice { amount currencyCode } }
           }
           pageInfo { hasNextPage endCursor }
@@ -137,7 +140,7 @@ async function listCategory(admin, category, shop) {
       category:p.category||'',family:p.family||'',
       // La foto REAL del producto queda detrás del MP4, también cuando Safari
       // bloquea el movimiento o el vídeo no tiene una miniatura utilizable.
-      image:png||p.featuredMedia?.image?.url||videoPoster||'',
+      image:png||p.media?.nodes?.find(m=>m?.image?.url)?.image?.url||p.featuredMedia?.image?.url||videoPoster||'',
       showcaseImage:Boolean(png&&!mp4),
       showcaseVideo:mp4,
       priceFormatted:money(price.amount||0,price.currencyCode||'EUR')};
