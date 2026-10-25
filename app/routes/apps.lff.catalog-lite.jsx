@@ -125,12 +125,24 @@ async function listCategory(admin, category, shop) {
 // V126: fast family slices from PostgreSQL; never fetch the full product gallery.
 function familyKey(v) { return norm(v).replace(/\s+/g, "-"); }
 function matchesFamily(p, rawFamily) {
-  const goal = familyKey(rawFamily);
-  if (!goal) return false;
-  if (familyKey(p.family) === goal) return true;
-  const tags = Array.isArray(p.tags) ? p.tags : [];
-  return tags.some(t => /^LFF_FAMILY:/i.test(String(t||"")) &&
-    familyKey(String(t).replace(/^LFF_FAMILY:/i,"")) === goal);
+  const goal=familyKey(rawFamily);
+  if(!goal)return false;
+  const tags=Array.isArray(p.tags)?p.tags:[];
+  // Normalizar nombres importados: «Naruto» / «Naruto Shippuden»;
+  // «DanDaDan» / «Dan Da Dan», sin asignar One Piece por palabras sueltas.
+  const related=value=>{
+    const key=familyKey(value);
+    if(!key)return false;
+    if(key===goal||key.replace(/-/g,"")===goal.replace(/-/g,""))return true;
+    const shorter=key.length<goal.length?key:goal;
+    const longer=key.length<goal.length?goal:key;
+    return shorter.length>=5&&longer.startsWith(shorter+"-");
+  };
+  if(related(p.family))return true;
+  return tags.some(t=>{
+    const raw=String(t||"");
+    return related(raw.replace(/^LFF_FAMILY:/i,""));
+  });
 }
 function productKindLite(p) {
   const tags=Array.isArray(p.tags)?p.tags:[];
