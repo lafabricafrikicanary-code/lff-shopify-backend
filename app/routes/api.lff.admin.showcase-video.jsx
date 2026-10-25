@@ -85,14 +85,14 @@ async function graph(admin,query,variables,key){
 async function getVideo(admin,productId){
   const d=await graph(admin,
     `query LffShowcaseVideoProduct($id:ID!){
-      product(id:$id){id metafield(namespace:"lff",key:"showcase_video"){
+      product(id:$id){id featuredMedia{id} metafield(namespace:"lff",key:"showcase_video"){
         id value type reference{... on Video{id fileStatus sources{url mimeType format}}}
       }}
     }`,{id:productId});
   if(!d.product)throw new Error("El producto no existe.");
   const f=d.product.metafield,video=f?.reference;
   const mp4=video?.sources?.find(s=>s.mimeType==="video/mp4"||s.format==="mp4");
-  return {hasVideo:Boolean(f?.value),fileStatus:video?.fileStatus||(f?.value?"PROCESSING":"NONE"),url:mp4?.url||"",metafieldId:f?.id||""};
+  return {hasVideo:Boolean(f?.value),fileStatus:video?.fileStatus||(f?.value?"PROCESSING":"NONE"),url:mp4?.url||"",metafieldId:f?.id||"",isPrimary:Boolean(video?.id&&d.product.featuredMedia?.id===video.id)};
 }
 async function shopifyClient(){
   const {admin}=await unauthenticated.admin(SHOP());
@@ -199,6 +199,32 @@ export const action=async({request})=>{
       video=created?.files?.[0];
     }
     if(!video?.id)throw new Error("Shopify no confirmó el vídeo.");
+    // The Shopify gallery appends new videos last. V145 moves the generated
+    // animation to index 0 so it is the actual featuredMedia / product cover.
+    // Keep all ten static mockups immediately behind the video.
+    let coverOrdered=false;
+    if(galleryLinked){
+      try{
+        const reordered=await graph(admin,
+          `mutation LffMugVideoFirst($id:ID!,$moves:[MoveInput!]!){
+            productReorderMedia(id:$id,moves:$moves){
+              job{id done}
+              mediaUserErrors{field message code}
+            }
+          }`,
+          {id:productId,moves:[{id:video.id,newPosition:"0"}]},
+          "productReorderMedia"
+        );
+        if(reordered?.mediaUserErrors?.length)
+          throw new Error(reordered.mediaUserErrors.map(x=>x.message).join("; "));
+        coverOrdered=Boolean(reordered?.job?.id);
+        if(!coverOrdered)throw new Error("Shopify no confirmó el cambio de orden de la portada.");
+      }catch(reorderError){
+        const message=String(reorderError?.message||"Error de ordenación");
+        galleryWarning=[galleryWarning,"No se pudo situar el vídeo primero: "+message].filter(Boolean).join(" | ");
+        console.warn("[LFF mug video cover order]",message);
+      }
+    }
     // Save VIDEO reference immediately; public catalog gets MP4 source after processing.
     await graph(admin,
       `mutation LffVideoProductReference($input:[MetafieldsSetInput!]!){
@@ -208,7 +234,7 @@ export const action=async({request})=>{
       actor:auth?.user?.displayName||auth?.user?.username||"Admin",
       targetType:"product",targetId:productId,replaced:current.hasVideo
     }).catch(()=>{});
-    return json(request,{ok:true,hasVideo:true,fileStatus:video.fileStatus||"PROCESSING",url:"",duration:normalized.duration,galleryLinked,galleryWarning,message:galleryLinked?"Vídeo vinculado a la galería y a la portada animada. Shopify lo procesará en segundo plano.":"Vídeo vinculado a la portada animada. La galería requiere revisión: "+galleryWarning});
+    return json(request,{ok:true,hasVideo:true,fileStatus:video.fileStatus||"PROCESSING",url:"",duration:normalized.duration,galleryLinked,coverOrdered,galleryWarning,message:galleryLinked?"Vídeo vinculado a la galería y a la portada animada. Shopify lo procesará en segundo plano.":"Vídeo vinculado a la portada animada. La galería requiere revisión: "+galleryWarning});
   }catch(error){
     console.error("[LFF showcase-video upload]",error);
     return json(request,{ok:false,error:error.message||"Error al vincular el MP4",retryable:/fetch failed|ECONNRESET|ETIMEDOUT|network|no response available|502|503|504/i.test(String(error?.message||""))},{status:/fetch failed|ECONNRESET|ETIMEDOUT|network|no response available|502|503|504/i.test(String(error?.message||""))?503:400});
