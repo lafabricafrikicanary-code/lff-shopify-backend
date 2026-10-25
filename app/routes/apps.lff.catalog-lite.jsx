@@ -11,9 +11,9 @@ const CATEGORY = {
   multiverse: { tags: ["multiusos", "multiverso", "multiverse", "multiusos-multiverso"], names: ["multiusos", "multiverso", "multiverse", "multiusos multiverso"] },
 };
 
-const REFRESH_AFTER_MS = 60_000; // periodic Shopify synchronization
+const REFRESH_AFTER_MS = 5 * 60_000; // avoid a full Shopify scan every minute
 const MAX_STALE_MS = 6 * 60 * 60_000;  // don't silently serve very old stock indefinitely
-const RAM_CACHE_MS = 20_000;
+const RAM_CACHE_MS = 90_000; // serve family batches without repeated PostgreSQL reads
 const ram = new Map();
 const refreshing = new Map();
 const refreshRetryAfter = new Map();
@@ -218,7 +218,7 @@ function send(category, row, cacheStatus, status = 200) {
     ok: true, category, products: row.products, cached: cacheStatus !== "fresh",
     cacheStatus, lastUpdated: row.updatedAt,
   }, { status, headers: {
-    "Cache-Control": "public, max-age=30",
+    "Cache-Control": "public, max-age=45, stale-while-revalidate=300",
     "X-LFF-Catalog-Cache": cacheStatus,
   } });
 }
