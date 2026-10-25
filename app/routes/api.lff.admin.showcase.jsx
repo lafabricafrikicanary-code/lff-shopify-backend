@@ -69,7 +69,23 @@ export const action = async ({ request }) => {
     const productId = String(data.get("productId") || "");
     if (!validId(productId)) throw new Error("Selecciona un producto válido.");
     const mode = String(data.get("intent") || "upload");
-    if (mode === "remove") throw new Error("Usa una imagen de reemplazo; no se elimina el archivo anterior por seguridad.");
+    if (mode === "remove") {
+      // Desvincular la portada PNG. No borra los archivos originales de Shopify.
+      const current = await readImage(admin, productId);
+      if (current) {
+        await graph(admin,
+          `mutation LffRemoveShowcasePng($input:[MetafieldIdentifierInput!]!){
+            metafieldsDelete(metafields:$input){deletedMetafields{key namespace ownerId}userErrors{field message}}
+          }`,
+          { input:[{ownerId:productId,namespace:KEY.namespace,key:KEY.key}] },
+          "metafieldsDelete");
+        await recordAudit(shopDomain(),"product.showcase_removed",{
+          actor:auth?.user?.displayName || auth?.user?.username || "Admin",
+          targetType:"product",targetId:productId
+        }).catch(()=>{});
+      }
+      return json(request,{ok:true,url:""});
+    }
     if (mode !== "upload") throw new Error("Acción no admitida.");
     const file = data.get("file");
     if (!file || !file.size || !file.arrayBuffer) throw new Error("Selecciona el PNG transparente.");
