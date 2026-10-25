@@ -164,14 +164,17 @@ function lffSearchFilter(url){
     const values=["tag:'LFF_FAMILY:"+family+"'","tag:'"+family+"'"];
     // Productos importados sin etiquetas internas: localizar también por nombre.
     const familyWords=family.split(/[\s\/]+/).filter(w=>w.length>=5);
-    if(familyWords.length)values.push("title:"+familyWords[0]);
+    if(familyWords.length){
+      values.push("title:"+familyWords[0]);
+      values.push("tag:"+familyWords[0]); // Importaciones antiguas con etiquetas simples.
+    }
     parts.push("("+[...new Set(values)].join(" OR ")+")");
   }else if(category&&category!=="__LFF_UNCATEGORIZED__"){
     parts.push("(tag:'LFF_CATEGORY:"+category+"' OR tag:'"+category+"')");
   }else if(category==="__LFF_UNCATEGORIZED__"){
-    // Una categoría sin etiquetas se puede localizar mediante texto; no se afirma
-    // exhaustividad sin realizar un índice global separado.
-    parts.push("-tag:LFF_CATEGORY*");
+    // La búsqueda de productos sin etiquetas se realiza desde búsqueda por nombre,
+    // sin tratar una coincidencia parcial como inventario exhaustivo.
+    if(!q)throw new Error("Introduce un nombre para buscar productos sin categoría.");
   }
   if(q)parts.push("(title:'"+q+"' OR tag:'"+q+"' OR vendor:'"+q+"')");
   return parts.join(" AND ");
