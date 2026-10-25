@@ -1,5 +1,5 @@
 FROM node:20-alpine
-RUN apk add --no-cache openssl
+RUN apk add --no-cache openssl ffmpeg
 
 EXPOSE 3000
 
