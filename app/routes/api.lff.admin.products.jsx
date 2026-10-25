@@ -144,6 +144,84 @@ async function listProductsPage(admin, after = null) {
   };
 }
 
+
+// V175 · Catalogue on demand. Counts and cards only, never variants or full media galleries.
+// Authentication and allowed origins are enforced by the existing loader.
+const LFF_LITE_LIMIT=24;
+function lffShopifySearchPhrase(value,max=100){
+  return String(value||"").normalize("NFKC").replace(/[\u0000-\u001F\u007F]/g," ")
+    .replace(/['"\\():*]/g," ").replace(/\s+/g," ").trim().slice(0,max);
+}
+function lffSearchFilter(url){
+  const category=lffShopifySearchPhrase(url.searchParams.get("category"),65);
+  const family=lffShopifySearchPhrase(url.searchParams.get("family"),100);
+  const q=lffShopifySearchPhrase(url.searchParams.get("q"),100);
+  const visibility=String(url.searchParams.get("visibility")||"").toLowerCase();
+  const parts=[];
+  if(visibility==="hidden")parts.push("(status:draft OR status:archived)");
+  else if(visibility==="active")parts.push("status:active");
+  if(family){
+    const values=["tag:'LFF_FAMILY:"+family+"'","tag:'"+family+"'"];
+    // Productos importados sin etiquetas internas: localizar también por nombre.
+    const familyWords=family.split(/[\s\/]+/).filter(w=>w.length>=5);
+    if(familyWords.length){
+      values.push("title:"+familyWords[0]);
+      values.push("tag:"+familyWords[0]); // Importaciones antiguas con etiquetas simples.
+    }
+    parts.push("("+[...new Set(values)].join(" OR ")+")");
+  }else if(category&&category!=="__LFF_UNCATEGORIZED__"){
+    parts.push("(tag:'LFF_CATEGORY:"+category+"' OR tag:'"+category+"')");
+  }else if(category==="__LFF_UNCATEGORIZED__"){
+    // La búsqueda de productos sin etiquetas se realiza desde búsqueda por nombre,
+    // sin tratar una coincidencia parcial como inventario exhaustivo.
+    if(!q)throw new Error("Introduce un nombre para buscar productos sin categoría.");
+  }
+  if(q)parts.push("(title:'"+q+"' OR tag:'"+q+"' OR vendor:'"+q+"')");
+  return parts.join(" AND ");
+}
+async function lffLightweightCounts(admin){
+  const response=await admin.graphql([
+    "query LffV175Counts {",
+    " total:productsCount(limit:10000){count precision}",
+    " active:productsCount(limit:10000,query:\"status:active\"){count precision}",
+    " drafts:productsCount(limit:10000,query:\"status:draft\"){count precision}",
+    " archived:productsCount(limit:10000,query:\"status:archived\"){count precision}",
+    "}"
+  ].join("\n"));
+  const payload=await response.json();
+  if(payload.errors?.length)throw new Error(payload.errors.map(x=>x.message).join("; "));
+  const c=payload.data||{};
+  return {all:c.total?.count||0,active:c.active?.count||0,
+    hidden:(c.drafts?.count||0)+(c.archived?.count||0),
+    drafts:c.drafts?.count||0,archived:c.archived?.count||0};
+}
+async function lffLightweightPage(admin,url){
+  const after=url.searchParams.get("cursor")||null;
+  if(after&&(after.length>2000||!/^[\w+/=-]+$/.test(after)))throw new Error("Cursor no válido.");
+  const search=lffSearchFilter(url);
+  const response=await admin.graphql([
+    "query LffV175Products($after:String,$search:String!){",
+    " products(first:24,after:$after,sortKey:UPDATED_AT,reverse:true,query:$search){",
+    "  nodes{id title handle status vendor productType updatedAt onlineStoreUrl tags totalInventory",
+    "    variantsCount{count} mediaCount{count}",
+    "    variants(first:1){nodes{inventoryPolicy}}",
+    "    media(first:1){nodes{preview{image{url}}}}",
+    "  }",
+    "  pageInfo{hasNextPage endCursor}",
+    " }",
+    " count:productsCount(limit:10000,query:$search){count precision}",
+    "}"
+  ].join("\n"),{variables:{after,search}});
+  const payload=await response.json();
+  if(payload.errors?.length)throw new Error(payload.errors.map(x=>x.message).join("; "));
+  const connection=payload.data?.products;
+  if(!connection)throw new Error("Shopify no devolvió los productos filtrados.");
+  return {products:(connection.nodes||[]).map(productPublic),
+    count:payload.data?.count?.count||0,
+    nextCursor:connection.pageInfo?.hasNextPage?connection.pageInfo?.endCursor||"": "",
+    hasNextPage:Boolean(connection.pageInfo?.hasNextPage)};
+}
+
 // Legacy callers remain supported, but the V142 Admin uses paged=1 so
 // a whole catalog never has to be downloaded in a single Render request.
 async function listProducts(admin) {
@@ -1168,6 +1246,11 @@ export const loader = async ({ request }) => {
     const url = new URL(request.url);
     const productId = url.searchParams.get("productId");
     if (productId) return json(request, { ok: true, product: await getProductDetail(admin, productId), template: templateSummary(), mugTemplate: mugTemplateSummary() });
+    // Fast paths: no 756-product sync, no full variants, no automatic mutations.
+    if(url.searchParams.get("mode")==="overview")
+      return json(request,{ok:true,counts:await lffLightweightCounts(admin)});
+    if(url.searchParams.get("mode")==="select")
+      return json(request,{ok:true,...await lffLightweightPage(admin,url)});
     if (url.searchParams.get("paged") === "1") {
       const cursor = url.searchParams.get("cursor") || null;
       if (cursor && (cursor.length > 2000 || !/^[\w+\/=-]+$/.test(cursor))) throw new Error("Cursor de productos no válido.");
