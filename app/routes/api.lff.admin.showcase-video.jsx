@@ -81,14 +81,52 @@ export const action=async({request})=>{
     payload.append("file",file,file.name);
     const transferred=await fetch(target.url,{method:"POST",body:payload});
     if(!transferred.ok)throw new Error("No se pudo transferir el vídeo: "+transferred.status);
-    const created=await graph(admin,
-      `mutation LffVideoFileCreate($files:[FileCreateInput!]!){
-        fileCreate(files:$files){
-          files{id fileStatus ... on Video{sources{url mimeType format}}}
-          userErrors{field message code}
-        }
-      }`,{files:[{contentType:"VIDEO",originalSource:target.resourceUrl,alt:"Animación de escaparate LFF | "+productId}]},"fileCreate");
-    const video=created?.files?.[0];
+    // V181: the old flow uploaded a Shopify FILE but never added the VIDEO
+    // to product.media. Product cards could use a metafield, but Shopify's
+    // product gallery still contained only the ten static mockups.
+    // productUpdate accepts the SAME staged resource URL, so a successful
+    // upload creates a VIDEO on the actual product without uploading twice.
+    let video=null, galleryLinked=false, galleryWarning="";
+    try{
+      const marker="LFF_PORTADA_ANIMADA::"+Date.now();
+      const attached=await graph(admin,
+        `mutation LffAttachCoverToProduct($product:ProductUpdateInput!,$media:[CreateMediaInput!]){
+          productUpdate(product:$product,media:$media){
+            product{
+              id media(first:250){
+                nodes{id alt mediaContentType ... on Video{fileStatus}}
+              }
+            }
+            userErrors{field message}
+          }
+        }`,
+        {product:{id:productId},media:[{
+          mediaContentType:"VIDEO",
+          originalSource:target.resourceUrl,
+          alt:marker
+        }]},
+        "productUpdate"
+      );
+      video=attached?.product?.media?.nodes?.find(m=>m.mediaContentType==="VIDEO"&&m.alt===marker)||null;
+      if(!video?.id)throw new Error("Shopify no devolvió la referencia del vídeo en la galería.");
+      galleryLinked=true;
+    }catch(attachError){
+      // Never sacrifice an otherwise valid MP4: retain the original
+      // file-reference behavior if the store does not support productUpdate.
+      galleryWarning=String(attachError?.message||"No pudo añadirse a galería");
+      console.warn("[LFF showcase-video gallery fallback]",galleryWarning);
+      const created=await graph(admin,
+        `mutation LffVideoFileCreate($files:[FileCreateInput!]!){
+          fileCreate(files:$files){
+            files{id fileStatus ... on Video{sources{url mimeType format}}}
+            userErrors{field message code}
+          }
+        }`,
+        {files:[{contentType:"VIDEO",originalSource:target.resourceUrl,alt:"Animación de escaparate LFF | "+productId}]},
+        "fileCreate"
+      );
+      video=created?.files?.[0];
+    }
     if(!video?.id)throw new Error("Shopify no confirmó el vídeo.");
     // Save VIDEO reference immediately; public catalog gets MP4 source after processing.
     await graph(admin,
@@ -99,7 +137,7 @@ export const action=async({request})=>{
       actor:auth?.user?.displayName||auth?.user?.username||"Admin",
       targetType:"product",targetId:productId,replaced:current.hasVideo
     }).catch(()=>{});
-    return json(request,{ok:true,hasVideo:true,fileStatus:video.fileStatus||"PROCESSING",url:"",message:"Vídeo recibido. Shopify lo procesará en segundo plano."});
+    return json(request,{ok:true,hasVideo:true,fileStatus:video.fileStatus||"PROCESSING",url:"",galleryLinked,galleryWarning,message:galleryLinked?"Vídeo vinculado a la galería y a la portada animada. Shopify lo procesará en segundo plano.":"Vídeo vinculado a la portada animada. La galería requiere revisión: "+galleryWarning});
   }catch(error){
     console.error("[LFF showcase-video upload]",error);
     return json(request,{ok:false,error:error.message},{status:400});
