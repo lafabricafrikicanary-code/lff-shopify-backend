@@ -114,8 +114,10 @@ async function listCategory(admin, category, shop) {
       url:p.onlineStoreUrl||`/products/${p.handle||''}`,
       tags:p.tags||[],productType:p.productType||'',
       category:p.category||'',family:p.family||'',
-      image:videoPoster||png||p.featuredMedia?.image?.url||'',
-      showcaseImage:Boolean(png&&!videoPoster),
+      // La foto REAL del producto queda detrás del MP4, también cuando Safari
+      // bloquea el movimiento o el vídeo no tiene una miniatura utilizable.
+      image:png||p.featuredMedia?.image?.url||videoPoster||'',
+      showcaseImage:Boolean(png&&!mp4),
       showcaseVideo:mp4,
       priceFormatted:money(price.amount||0,price.currencyCode||'EUR')};
   });
