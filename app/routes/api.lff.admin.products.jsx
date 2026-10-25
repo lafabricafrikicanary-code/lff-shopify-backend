@@ -557,7 +557,7 @@ async function updateProductDetails(admin, body) {
   const existingTags = existingPayload.data?.product?.tags || [];
   // Conservar las etiquetas técnicas al guardar desde Administración: sin ellas,
   // los pósteres perderían su tipo/orientación y el filtro por producto fallaría.
-  const internal = existingTags.filter(t => /^(?:LFF_LIGHT_OPTIONS_V1|LFF_PRODUCT_TYPE:|LFF_POSTER_ORIENTATION:)/i.test(String(t)));
+  const internal = existingTags.filter(t => /^(?:LFF_AUTODRAFT|LFF_LIGHT_OPTIONS_V1|LFF_PRODUCT_TYPE:|LFF_POSTER_ORIENTATION:)/i.test(String(t)));
   const tags = [...new Set([...internal, ...organizationalTags(category, family), ...cleanTags(body.tags)])].slice(0, 50);
   const product = {
     id: productId,
@@ -578,6 +578,55 @@ async function updateProductDetails(admin, body) {
   const payload = await response.json();
   gqlErrors(payload, "productUpdate");
   return getProductDetail(admin, productId);
+}
+
+// V171: actualizar únicamente el prefijo de SKU generado por LFF, sin tocar opciones,
+// precios, inventario, imágenes ni productos ajenos al generador automático.
+async function updateGeneratedSkuPrefix(admin, body) {
+  const id = String(body.productId || "").trim();
+  const prefix = String(body.skuPrefix || "").trim().toUpperCase();
+  if (!/^gid:\/\/shopify\/Product\/\d+$/.test(id)) throw new Error("Producto no válido.");
+  if (!/^[A-Z0-9][A-Z0-9-]{1,39}$/.test(prefix)) throw new Error("El prefijo SKU debe tener de 2 a 40 caracteres, letras, números o guiones.");
+  let cursor=null, more=true, safety=0, all=[];
+  const suffixPattern=/-(MUG|UNISEX_TSRA190|WOMAN_TSRLCMF|KID_TSRK150|HOODIE_JTSWKNG|WOMAN_TOP_SPORTARBL|WOMAN_CROP_TOP_TSULMALIA)(?:-[A-Z0-9_]+)+$/i;
+  while(more&&safety++<12){
+    const response=await admin.graphql(
+      `query LffV171GeneratedSkus($id:ID!,$after:String){
+        product(id:$id){id tags variants(first:250,after:$after){
+          nodes{id sku} pageInfo{hasNextPage endCursor}
+        }}
+      }`,{variables:{id,after:cursor}});
+    const jsonBody=await response.json();
+    if(jsonBody.errors?.length)throw new Error(jsonBody.errors.map(e=>e.message).join("; "));
+    const product=jsonBody.data?.product;
+    if(!product)throw new Error("No se encontró el producto.");
+    if(!(product.tags||[]).some(t=>String(t).toUpperCase()==="LFF_AUTODRAFT"))
+      throw new Error("Por seguridad, el prefijo SKU automático solo se cambia en productos generados por Mockup Studio.");
+    const variants=product.variants;
+    for(const variant of variants?.nodes||[]){
+      const match=String(variant.sku||"").match(suffixPattern);
+      if(!match)throw new Error("El SKU actual no sigue el patrón de LFF. No se ha modificado ningún SKU.");
+      all.push({id:variant.id,sku:prefix+"-"+match[0].slice(1),original:variant.sku||""});
+    }
+    more=Boolean(variants?.pageInfo?.hasNextPage);
+    cursor=variants?.pageInfo?.endCursor||null;
+    if(more&&!cursor)throw new Error("No se recibió el siguiente lote de variantes.");
+  }
+  if(more)throw new Error("Demasiadas variantes para actualizar con seguridad.");
+  if(!all.length)throw new Error("El producto no tiene variantes.");
+  const updates=all.filter(v=>v.sku!==v.original);
+  for(let i=0;i<updates.length;i+=100){
+    const response=await admin.graphql(
+      `mutation LffV171UpdateGeneratedSkus($productId:ID!,$variants:[ProductVariantsBulkInput!]!){
+        productVariantsBulkUpdate(productId:$productId,variants:$variants,allowPartialUpdates:false){
+          product{id} userErrors{field message}
+        }
+      }`,
+      {variables:{productId:id,variants:updates.slice(i,i+100).map(v=>({id:v.id,sku:v.sku}))}});
+    const result=await response.json();
+    gqlErrors(result,"productVariantsBulkUpdate");
+  }
+  return {updated:updates.length,total:all.length,prefix};
 }
 
 async function setExistingMediaCover(admin, body) {
@@ -1227,6 +1276,14 @@ export const action = async ({ request }) => {
         count: result.deletedMediaIds.length,
       }).catch(() => {});
       return json(request, { ok: true, ...result });
+    }
+    if (intent === "set-generated-sku-prefix") {
+      const result = await updateGeneratedSkuPrefix(admin, body);
+      await recordAudit(shop, "product.generated_sku_updated", {
+        actor, targetType: "product", targetId: body.productId,
+        prefix: result.prefix, updated: result.updated
+      }).catch(() => {});
+      return json(request, {ok:true,...result});
     }
     if (intent === "update-product") {
       const product = await updateProductDetails(admin, body);
