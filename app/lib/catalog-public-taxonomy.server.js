@@ -16,6 +16,11 @@ const builtins = [
   { name:'One Piece', familyKey:'one-piece', category:'anime', aliases:['one piece','monkey d luffy','luffy','roronoa zoro','zoro','sanji','usopp','chopper','nico robin','mugiwara','gear 5','gear fifth','trafalgar law','portgas ace'] },
   { name:'Naruto', familyKey:'naruto', category:'anime', aliases:['naruto','sasuke','itachi','kakashi','sakura haruno','madara uchiha','uchiha','akatsuki','jiraiya','minato namikaze','gaara','obito'] },
   { name:'Coco', familyKey:'coco', category:'disney', aliases:['coco','miguel rivera','hector rivera'] },
+  // V181: cuatro productos activos con LFF_AUTODRAFT carecen de categoría/familia.
+  // Clasificación pública de solo lectura, sin modificar etiquetas originales.
+  { name:'Dragon Ball', familyKey:'dragon-ball', category:'anime', aliases:['dragon ball','dragon ball z','goku','vegeta'] },
+  { name:'Mob Psycho 100', familyKey:'mob-psycho-100', category:'anime', aliases:['mob psycho 100','shigeo kageyama'] },
+  { name:'Assassination Classroom', familyKey:'assassination-classroom', category:'anime', aliases:['assassination classroom','koro sensei','koro-sensei'] },
 ];
 function titleMatches(text, aliases){
   const normalized = ` ${normCatalog(text)} `;
