@@ -38,7 +38,9 @@ export async function familyCatalogTaxonomy(shop, products){
     const tags=Array.isArray(product.tags)?product.tags:[];
     const catTag=tags.find(tag=>/^LFF_CATEGORY:/i.test(String(tag)))||'';
     const famTag=tags.find(tag=>/^LFF_FAMILY:/i.test(String(tag)))||'';
-    const category=product.category||catTag.split(':').slice(1).join(':').trim();
+    const declared=catTag.split(':').slice(1).join(':').trim();
+    const inferredCategoryTag=tags.find(tag=>['anime','anime manga','anime y manga','manga','gaming','zona de juegos','zona gaming','videojuegos','disney','disney pixar','disney y pixar','marvel','star wars','multiusos','multiverso','multiverse'].includes(normCatalog(tag)))||'';
+    const category=product.category||declared||inferredCategoryTag;
     const family=product.family||famTag.split(':').slice(1).join(':').trim();
     // Explicit classification always wins. No automatic rewriting of Shopify data.
     if (category && family) return {...product,category,family};
@@ -57,5 +59,14 @@ export function publicCategoryMatch(p, category){
   // Public catalog metadata may contain explicit category aliases.
   const tags=Array.isArray(p.tags)?p.tags:[];
   const categoryTag=tags.find(tag=>/^LFF_CATEGORY:/i.test(String(tag)))||'';
-  return categoryKey(categoryTag.replace(/^LFF_CATEGORY:/i,''))===category;
+  if(categoryKey(categoryTag.replace(/^LFF_CATEGORY:/i,''))===category)return true;
+  // Importaciones desde OpenClaw/Shopify: categoría en una etiqueta normal.
+  // No utilizar títulos aquí para evitar mezclar franquicias de distintos portales.
+  const plainAliases={
+    anime:new Set(['anime','anime manga','anime y manga','manga']),
+    gaming:new Set(['gaming','zona de juegos','zona gaming','videojuegos']),
+    disney:new Set(['disney','disney pixar','disney y pixar','marvel','star wars']),
+    multiverse:new Set(['multiusos','multiverso','multiverse','multiusos multiverso'])
+  };
+  return tags.some(raw=>plainAliases[category]?.has(normCatalog(raw)));
 }
