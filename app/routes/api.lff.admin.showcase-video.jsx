@@ -60,11 +60,27 @@ async function normalizeShowcaseVideo(file){
 }
 const validId=id=>/^gid:\/\/shopify\/Product\/\d+$/.test(String(id||""));
 async function graph(admin,query,variables,key){
-  const result=await admin.graphql(query,{variables});
-  const body=await result.json();
-  const errors=[...(body.errors||[]),...(key?body.data?.[key]?.userErrors||[]:[])];
-  if(!result.ok||errors.length)throw new Error(errors.map(e=>e.message).join("; ")||"Error de Shopify "+result.status);
-  return key?body.data?.[key]:body.data;
+  // V144: Shopify may drop transient connections during busy product uploads.
+  // Retry safe GETs, staged-target creation and idempotent metafield updates.
+  // Never blindly repeat media creation: a network error may occur AFTER success.
+  const safeRetry=/^\s*query\b|stagedUploadsCreate|metafieldsSet/.test(query);
+  const maxAttempts=safeRetry?3:1;
+  for(let attempt=0;attempt<maxAttempts;attempt++){
+    try{
+      const result=await admin.graphql(query,{variables});
+      const body=await result.json();
+      const errors=[...(body.errors||[]),...(key?body.data?.[key]?.userErrors||[]:[])];
+      if(!result.ok||errors.length)
+        throw new Error(errors.map(e=>e.message).join("; ")||"Error de Shopify "+result.status);
+      return key?body.data?.[key]:body.data;
+    }catch(error){
+      const message=String(error?.message||"");
+      const transient=/fetch failed|ECONNRESET|ECONNREFUSED|ETIMEDOUT|EAI_AGAIN|network|no response available|429|502|503|504|throttled/i.test(message);
+      if(!safeRetry||!transient||attempt===maxAttempts-1)throw error;
+      console.warn("[LFF showcase-video] Shopify conexión transitoria, reintentando",attempt+2,"/",maxAttempts);
+      await new Promise(resolve=>setTimeout(resolve,500*Math.pow(2,attempt)));
+    }
+  }
 }
 async function getVideo(admin,productId){
   const d=await graph(admin,
@@ -195,6 +211,6 @@ export const action=async({request})=>{
     return json(request,{ok:true,hasVideo:true,fileStatus:video.fileStatus||"PROCESSING",url:"",duration:normalized.duration,galleryLinked,galleryWarning,message:galleryLinked?"Vídeo vinculado a la galería y a la portada animada. Shopify lo procesará en segundo plano.":"Vídeo vinculado a la portada animada. La galería requiere revisión: "+galleryWarning});
   }catch(error){
     console.error("[LFF showcase-video upload]",error);
-    return json(request,{ok:false,error:error.message},{status:400});
+    return json(request,{ok:false,error:error.message||"Error al vincular el MP4",retryable:/fetch failed|ECONNRESET|ETIMEDOUT|network|no response available|502|503|504/i.test(String(error?.message||""))},{status:/fetch failed|ECONNRESET|ETIMEDOUT|network|no response available|502|503|504/i.test(String(error?.message||""))?503:400});
   }
 };
