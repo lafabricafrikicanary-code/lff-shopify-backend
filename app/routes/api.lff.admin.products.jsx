@@ -758,6 +758,42 @@ async function setExistingMediaCover(admin, body) {
   };
 }
 
+// V146: single uploaded shirt image -> Shopify featured media + public cover.
+async function setComposedApparelCover(admin,body){
+  const productId=String(body.productId||"").trim(),mediaId=String(body.mediaId||"").trim();
+  const color=String(body.color||"").trim();
+  if(!/^gid:\/\/shopify\/Product\/\d+$/.test(productId)||!mediaId)
+    throw new Error("Producto o imagen de portada no válidos.");
+  if(!["Negro","Blanco"].includes(color))
+    throw new Error("Elige portada negra o blanca.");
+  const product=await getProductDetail(admin,productId);
+  const chosen=(product.media||[]).find(m=>m.id===mediaId&&m.mediaContentType==="IMAGE");
+  if(!chosen||!String(chosen.alt||"").includes("LFF_COMPOSED_COVER::"))
+    throw new Error("Elige una imagen creada con el editor de portada.");
+  await setExistingMediaCover(admin,{productId,mediaId,model:"Camisa hombre",color});
+  let imageUrl=chosen.image||"";
+  for(let i=0;!imageUrl&&i<12;i++){
+    await new Promise(resolve=>setTimeout(resolve,600));
+    const current=await getProductDetail(admin,productId);
+    imageUrl=(current.media||[]).find(m=>m.id===mediaId)?.image||"";
+  }
+  if(!imageUrl)return {mediaId,featured:true,publicCoverPending:true,
+    message:"Portada seleccionada como principal. Shopify todavía procesa la miniatura; vuelve a pulsar Guardar si no se refleja en el escaparate."};
+  const cdn=new URL(imageUrl);
+  if(cdn.protocol!=="https:"||cdn.hostname!=="cdn.shopify.com")
+    throw new Error("La URL de la imagen no pertenece al CDN de Shopify.");
+  const response=await admin.graphql(
+    `mutation LffComposedCoverMeta($input:[MetafieldsSetInput!]!){
+      metafieldsSet(metafields:$input){userErrors{field message}}
+    }`,
+    {variables:{input:[{ownerId:productId,namespace:"lff",key:"showcase_png",type:"url",value:imageUrl}]}},
+  );
+  const payload=await response.json();
+  gqlErrors(payload,"metafieldsSet");
+  return {mediaId,featured:true,publicCoverPending:false,imageUrl,
+    message:"Portada puesta como primera imagen en Shopify y en el escaparate público."};
+}
+
 async function deleteProductMedia(admin, body) {
   const productId = String(body.productId || "").trim();
   const requested = Array.isArray(body.mediaIds) ? body.mediaIds : [body.mediaId];
@@ -1330,6 +1366,13 @@ export const action = async ({ request }) => {
       const result = await assignPosterSizeMedia(admin, body);
       await recordAudit(shop, "product.poster_media_assigned", { actor, targetType: "product", targetId: body.productId, mediaId: body.mediaId, size: body.size }).catch(() => {});
       return json(request, { ok: true, ...result });
+    }
+    if (intent === "set-composed-cover") {
+      const result=await setComposedApparelCover(admin,body);
+      await recordAudit(shop,"product.apparel_cover_composed",{
+        actor,targetType:"product",targetId:body.productId,mediaId:body.mediaId,color:body.color
+      }).catch(()=>{});
+      return json(request,{ok:true,...result});
     }
     if (intent === "set-cover") {
       const result = await setExistingMediaCover(admin, body);
