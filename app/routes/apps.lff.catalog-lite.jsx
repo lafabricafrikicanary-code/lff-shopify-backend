@@ -111,6 +111,71 @@ async function listCategory(admin, category, shop) {
       priceFormatted:money(price.amount||0,price.currencyCode||'EUR')};
   });
 }
+// V126: fast family slices from PostgreSQL; never fetch the full product gallery.
+function familyKey(v) { return norm(v).replace(/\s+/g, "-"); }
+function matchesFamily(p, rawFamily) {
+  const goal = familyKey(rawFamily);
+  if (!goal) return false;
+  if (familyKey(p.family) === goal) return true;
+  const tags = Array.isArray(p.tags) ? p.tags : [];
+  return tags.some(t => /^LFF_FAMILY:/i.test(String(t||"")) &&
+    familyKey(String(t).replace(/^LFF_FAMILY:/i,"")) === goal);
+}
+function productKindLite(p) {
+  const tags=Array.isArray(p.tags)?p.tags:[];
+  const declared=tags.find(t=>/^LFF_PRODUCT_TYPE:/i.test(String(t||"")));
+  const hint=norm(declared?String(declared).split(":").slice(1).join(":"):"");
+  const title=norm(p.title),productType=norm(p.productType);
+  const classify=x=>{
+    if(/poster|lamina|cuadro/.test(x))return "poster";
+    if(/taza|mug/.test(x))return "taza";
+    if(/textil|ropa|camiseta|camisa|sudadera|hoodie|crop top|apparel/.test(x))return "textil";
+    return "";
+  };
+  if(hint)return classify(hint)||familyKey(hint).slice(0,65);
+  if(/poster|lamina|cuadro/.test(title))return "poster";
+  if(/taza|mug/.test(title))return "taza";
+  if(classify(productType))return classify(productType);
+  if(/merchandising lff/.test(productType))return "textil";
+  if(classify(title))return classify(title);
+  return productType?familyKey(productType).slice(0,65):"otros";
+}
+function sendFamily(category,row,params,cacheStatus){
+  const family=String(params.get("family")||"").trim().slice(0,120);
+  const phase=params.get("phase")==="more"?"more":"initial";
+  const kind=String(params.get("kind")||"").slice(0,65);
+  const offset=Math.min(20000,Math.max(0,Number.parseInt(params.get("offset")||"0",10)||0));
+  const batchSize=Math.min(24,Math.max(4,Number.parseInt(params.get("limit")||"12",10)||12));
+  const selected=(Array.isArray(row.products)?row.products:[]).filter(p=>matchesFamily(p,family));
+  const byKind=new Map();
+  selected.forEach(p=>{
+    const k=productKindLite(p);
+    if(!byKind.has(k))byKind.set(k,[]);
+    byKind.get(k).push(p);
+  });
+  const kinds=["textil","taza","poster",...byKind.keys()].filter((k,i,a)=>byKind.has(k)&&a.indexOf(k)===i);
+  const countsByKind=Object.fromEntries(kinds.map(k=>[k,byKind.get(k).length]));
+  let products=[],hasMore=false,nextOffset=0;
+  if(phase==="more"){
+    const group=byKind.get(kind)||[];
+    products=group.slice(offset,offset+batchSize);
+    nextOffset=offset+products.length;
+    hasMore=nextOffset<group.length;
+  }else {
+    products=kinds.flatMap(k=>byKind.get(k).slice(0,4));
+    nextOffset=4;
+    hasMore=selected.length>products.length;
+  }
+  return Response.json({
+    ok:true,category,family,phase,kind,products,kinds,countsByKind,
+    total:selected.length,hasMore,nextOffset,lastUpdated:row.updatedAt,
+    cacheStatus
+  },{headers:{
+    "Cache-Control":"public, max-age=45, stale-while-revalidate=300",
+    "X-LFF-Catalog-Cache":cacheStatus
+  }});
+}
+
 function snapshotIsValid(row) {
   return row && Array.isArray(row.products);
 }
@@ -167,24 +232,29 @@ export const loader = async ({ request }) => {
     const shop = process.env.SHOPIFY_SHOP_DOMAIN || url.searchParams.get("shop");
     if (!shop) return Response.json({ ok: false, error: "Tienda no configurada" }, { status: 400 });
     const forceRefresh = ["1", "true", "yes"].includes(String(url.searchParams.get("refresh") || "").toLowerCase());
+    const family=String(url.searchParams.get("family")||"").trim();
+    if(family.length>120)return Response.json({ok:false,error:"Familia no válida"},{status:400});
+    const deliver=(saved,status)=>family
+      ?sendFamily(category,saved,url.searchParams,status)
+      :send(category,saved,status);
     let row = forceRefresh ? null : await readSnapshot(shop, category);
     if (snapshotIsValid(row)) {
       const age = snapshotInfo(row).ageMs;
-      if (age < REFRESH_AFTER_MS) return send(category, row, "persistent");
-      // A successful publication in Shopify must not stay hidden for hours.
-      // Wait for one shared refresh every 5 minutes; during API outages keep
-      // the last known good snapshot instead of displaying an empty catalog.
-      if (age < MAX_STALE_MS && (refreshRetryAfter.get(`${shop}:${category}`) || 0) > Date.now())
-        return send(category, row, "stale-retry-later");
+      if (age < REFRESH_AFTER_MS) return deliver(row,"persistent");
+      // Stale-while-revalidate: never block shoppers on the slow Shopify scan.
+      const key=shop+":"+category;
+      if(!refreshing.has(key) && (refreshRetryAfter.get(key)||0)<Date.now()){
+        void refresh(shop,category).catch(error=>console.error("[LFF V126 refresh]",category,error));
+      }
+      return deliver(row,age>MAX_STALE_MS?"stale-expired":"stale-refreshing");
     }
     try {
       row = await refresh(shop, category);
-      return send(category, row, forceRefresh ? "fresh-forced" : "fresh");
+      return deliver(row,forceRefresh ? "fresh-forced" : "fresh");
     } catch (error) {
-      // Keep the last known working catalog available during Shopify outages.
       if (snapshotIsValid(row)) {
-        console.error("[LFF V140 stale fallback]", category, error);
-        return send(category, row, "stale-fallback");
+        console.error("[LFF V126 stale fallback]", category, error);
+        return deliver(row,"stale-fallback");
       }
       throw error;
     }
