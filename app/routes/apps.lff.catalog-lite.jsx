@@ -62,7 +62,7 @@ async function getShopifyProducts(admin, filter, publicationId) {
             id title handle status tags productType onlineStoreUrl
             metafield(namespace: "lff", key: "showcase_png") { value }
             showcaseVideo:metafield(namespace:"lff",key:"showcase_video"){
-              reference{... on Video{id fileStatus sources{url mimeType format}}}
+              reference{... on Video{id fileStatus preview{image{url(transform:{maxWidth:520})}} sources{url mimeType format}}}
             }
             publishedOnPublication(publicationId: $pub)
             featuredMedia { ... on MediaImage { image { url(transform: {maxWidth: 520}) } } }
@@ -105,14 +105,18 @@ async function listCategory(admin, category, shop) {
     seen.add(key);return true;
   }).map(p=>{
     const price=p.priceRangeV2?.minVariantPrice||{};
+    const video=p.showcaseVideo?.reference?.fileStatus==="READY" ? p.showcaseVideo.reference : null;
+    const mp4=video?.sources?.find(x=>x.mimeType==="video/mp4"||x.format==="mp4")?.url||"";
+    // La miniatura de Shopify funciona como portada hasta que se interactúa.
+    const videoPoster=mp4 ? (video?.preview?.image?.url||"") : "";
+    const png=/^https:\/\/cdn\.shopify\.com\//.test(String(p.metafield?.value||"")) ? p.metafield.value : "";
     return {id:p.id,title:p.title||'Producto',handle:p.handle||'',
       url:p.onlineStoreUrl||`/products/${p.handle||''}`,
       tags:p.tags||[],productType:p.productType||'',
       category:p.category||'',family:p.family||'',
-      image:(/^https:\/\/cdn\.shopify\.com\//.test(String(p.metafield?.value||""))?p.metafield.value:"") || p.featuredMedia?.image?.url||'',
-      showcaseImage:/^https:\/\/cdn\.shopify\.com\//.test(String(p.metafield?.value||"")),
-      showcaseVideo:(p.showcaseVideo?.reference?.fileStatus==="READY" ?
-        p.showcaseVideo.reference.sources?.find(x=>x.mimeType==="video/mp4"||x.format==="mp4")?.url : "") || "",
+      image:videoPoster||png||p.featuredMedia?.image?.url||'',
+      showcaseImage:Boolean(png&&!videoPoster),
+      showcaseVideo:mp4,
       priceFormatted:money(price.amount||0,price.currencyCode||'EUR')};
   });
 }
