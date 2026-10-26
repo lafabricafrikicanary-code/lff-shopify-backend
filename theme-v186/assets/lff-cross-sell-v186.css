@@ -1,0 +1,28 @@
+/* LFF V186 · Compact cross-sell modal · dark/neon, keyboard and mobile friendly */
+.lffOfferLock{overflow:hidden!important}
+.lffOfferOverlay{position:fixed;inset:0;z-index:2147483000;background:rgba(2,3,12,.84);backdrop-filter:blur(12px);-webkit-backdrop-filter:blur(12px);display:flex;justify-content:center;align-items:center;padding:clamp(10px,3vw,30px)}
+.lffOfferDialog{width:min(920px,100%);max-height:min(91dvh,850px);overflow-y:auto;overscroll-behavior:contain;background:radial-gradient(circle at 15% 0,rgba(124,54,236,.18),transparent 47%),linear-gradient(145deg,#121526,#080a15 75%);border:1px solid rgba(148,116,252,.52);border-radius:22px;box-shadow:0 26px 100px #000d,0 0 32px #7f49ec29;color:#f3f1ff;position:relative;padding:clamp(18px,3vw,30px);font-family:inherit}
+.lffOfferClose{position:absolute;right:15px;top:15px;border:1px solid #ffffff2e;background:#181d30;color:#fff;width:35px;height:35px;border-radius:50%;font-size:22px;cursor:pointer;line-height:1}
+.lffOfferKicker{font-size:11px;letter-spacing:.2em;font-weight:800;color:#aaa1ff;text-transform:uppercase}
+.lffOfferTitle{font-size:clamp(23px,3.5vw,34px);line-height:1.15;margin:6px 45px 8px 0;color:#fff}
+.lffOfferTitle span{color:#a995ff}
+.lffOfferLead{color:#b8c1d9;font-size:13px;line-height:1.55;margin:0 0 18px}
+.lffOfferGrid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px}
+.lffOfferItem{min-width:0;border:1px solid rgba(143,140,207,.28);border-radius:15px;padding:9px;background:rgba(255,255,255,.035);display:flex;flex-direction:column;gap:7px;transition:border-color .18s ease,transform .18s ease}
+.lffOfferItem:hover{border-color:#8e70ff;transform:translateY(-2px)}
+.lffOfferImage{width:100%;aspect-ratio:1/1;object-fit:contain;border-radius:11px;background:radial-gradient(circle,#191c36,#090b19)}
+.lffOfferName{font-size:12px;font-weight:700;line-height:1.35;margin:0;min-height:34px;overflow:hidden;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical}
+.lffOfferPrice{display:flex;flex-wrap:wrap;align-items:baseline;gap:5px;margin-top:auto}
+.lffOfferOld{color:#8991aa;text-decoration:line-through;font-size:11px}.lffOfferNew{color:#7df0c5;font-size:15px;font-weight:800}
+.lffOfferVariant{width:100%;min-width:0;border-radius:8px;background:#181d30;border:1px solid #505576;color:#eff0ff;padding:8px 7px;font-size:11px}
+.lffOfferAdd{width:100%;border:0;border-radius:9px;background:linear-gradient(110deg,#7843e9,#307ef5);color:white;min-height:38px;font-weight:800;font-size:11px;padding:8px;cursor:pointer}
+.lffOfferAdd:disabled{opacity:.68;cursor:default}
+.lffOfferActions{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-top:18px;flex-wrap:wrap}
+.lffOfferCount{color:#bcb9d0;font-size:12px}.lffOfferContinue,.lffOfferSkip{border:0;border-radius:11px;color:#fff;background:linear-gradient(100deg,#6c39d7,#1265dc);padding:13px 20px;min-height:45px;font-size:13px;font-weight:800;cursor:pointer}
+.lffOfferSkip{background:#282c47;border:1px solid #767c9f}
+.lffOfferContinue:disabled{opacity:.6;cursor:progress}
+.lffOfferStatus{margin-top:10px;color:#bad4f9;font-size:12px;min-height:16px;line-height:1.45}
+.lffOfferStatus[role="alert"]{color:#ffd0a4}
+.lffOfferHint{margin-top:8px;font-size:11px;color:#8e9bb9;line-height:1.5}
+@media(max-width:720px){.lffOfferOverlay{padding:8px;align-items:center}.lffOfferDialog{max-height:94dvh;border-radius:17px;padding:17px 12px}.lffOfferGrid{grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}.lffOfferItem{padding:7px;gap:5px}.lffOfferImage{aspect-ratio:1.35/1}.lffOfferTitle{font-size:22px}.lffOfferName{font-size:11px;min-height:29px}.lffOfferActions{flex-direction:column;align-items:stretch}.lffOfferCount{text-align:center}.lffOfferContinue,.lffOfferSkip{width:100%}}
+@media(prefers-reduced-motion:reduce){.lffOfferItem{transition:none}.lffOfferOverlay{backdrop-filter:none;-webkit-backdrop-filter:none}}
