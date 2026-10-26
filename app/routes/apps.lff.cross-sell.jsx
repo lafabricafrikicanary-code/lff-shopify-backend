@@ -84,6 +84,7 @@ export const action = async ({ request }) => {
     const now = Date.now();
     const input = {
       code,
+      context: { all: "ALL" },
       title: "LFF V186 · Extra 15 % · Artículos recomendados",
       startsAt: new Date(now - 15000).toISOString(),
       endsAt: new Date(now + 45 * 60 * 1000).toISOString(),
