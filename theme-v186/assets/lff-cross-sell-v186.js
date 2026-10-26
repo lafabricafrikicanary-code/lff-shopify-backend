@@ -46,7 +46,7 @@
   async function getProduct(handle) {
     if (!handle || !/^[a-z0-9][a-z0-9-]{1,119}$/i.test(handle)) return null;
     if (!productCache.has(handle)) {
-      productCache.set(handle, jsonFetch(route("products/" + encodeURIComponent(handle) + ".js"), {}, 4500).catch(() => null));
+      productCache.set(handle, jsonFetch(route("products/" + encodeURIComponent(handle) + ".js"), {}, 2600).catch(() => null));
     }
     return productCache.get(handle);
   }
