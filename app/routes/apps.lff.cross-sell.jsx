@@ -5,7 +5,7 @@ import { authenticate } from "../shopify.server";
 
 const GIFT_PRODUCT_ID = "gid://shopify/Product/16137290481994";
 const ONLINE_STORE_PUBLICATION_ID = "gid://shopify/Publication/372216987978";
-const SHOP = "lafabricafriki.myshopify.com";
+const SHOP = "unvufs-6t.myshopify.com";
 const recentRequests = new Map();
 const WINDOW = 15 * 60 * 1000;
 const MAX_PER_IP = 4;
