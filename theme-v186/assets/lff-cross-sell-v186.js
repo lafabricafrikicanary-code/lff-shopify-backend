@@ -113,7 +113,7 @@
       }catch{}
     }
     const chosen=[];
-    for(let i=0;i<Math.min(ordered.length,20)&&chosen.length<4;i+=8){
+    for(let i=0;i<Math.min(ordered.length,16)&&chosen.length<4;i+=8){
       const products=await Promise.all(ordered.slice(i,i+8).map(getProduct));
       for(const p of products){
         if(chosen.length>=4)break;
@@ -205,12 +205,14 @@
       picker.appendChild(o);
     });
     if (choices.length <= 1) picker.hidden = true;
+    let cardAdded = false;
     const button = document.createElement("button");
     button.className = "lffOfferAdd"; button.type = "button"; button.textContent = "Añadir al inventario · -15 %";
     const updatePrice = () => {
       const v = choices[Number(picker.value) || 0] || choices[0], cents = Number(v?.price || 0);
       old.textContent = euros(cents); current.textContent = euros(Math.round(cents * 0.85));
-      button.disabled = selected.has(Number(v?.id));
+      button.disabled = cardAdded || selected.has(Number(v?.id));
+      picker.disabled = cardAdded;
       button.textContent = button.disabled ? "AÑADIDO ✓" : "Añadir al inventario · -15 %";
     };
     picker.addEventListener("change", updatePrice);
@@ -221,6 +223,7 @@
       try {
         await jsonFetch(route("cart/add.js"), {method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify({items:[{id:Number(v.id),quantity:1,properties:{"_lff_cross_sell":"v186"}}]})}, 6500);
         selected.add(Number(v.id));
+        cardAdded = true;
         updatePrice(); updateCount(); status("Artículo añadido. El 15 % se aplicará en el checkout si Shopify confirma la promoción.");
       } catch {
         button.disabled = false; button.textContent = "Reintentar"; status("No se pudo añadir este artículo. Puedes probar otra variante o continuar.", true);
@@ -267,12 +270,12 @@
       if (!physical.length) return normalCheckout();
       originalVariants = (cart.items || []).map(x => String(x.variant_id));
       selected = new Set();
-      setSession(SEEN_KEY, true);
       createOverlay();
       const offers = await recommendations(cart);
       if (!overlay) return;
       if (!offers.length) { status("No se han podido cargar ofertas ahora. Puedes continuar directamente al pago."); return; }
       offers.forEach(appendCard);
+      setSession(SEEN_KEY, true);
       status("Tus artículos originales mantienen su precio. Solo los nuevos extras seleccionados reciben la oferta.");
     } catch { return normalCheckout(); }
     finally { opening = false; }
