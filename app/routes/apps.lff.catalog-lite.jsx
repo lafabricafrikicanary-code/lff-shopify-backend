@@ -87,8 +87,8 @@ async function getShopifyProducts(admin, filter, publicationId) {
             }
             publishedOnPublication(publicationId: $pub)
             featuredMedia { ... on MediaImage { image { url(transform: {maxWidth: 520}) } } }
-            // Even when VIDEO is in position 0, fetch one static product photo:
-            // Safari reduce-motion, failed video and image fallbacks need it.
+            # Even when VIDEO is in position 0, fetch one static product photo:
+            # Safari reduce-motion, failed video and image fallbacks need it.
             media(first: 2) { nodes { ... on MediaImage { image { url(transform: {maxWidth: 520}) } } } }
             priceRangeV2 { minVariantPrice { amount currencyCode } }
           }
