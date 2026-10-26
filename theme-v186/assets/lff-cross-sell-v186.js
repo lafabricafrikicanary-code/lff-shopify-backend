@@ -6,7 +6,7 @@
   window.__lffCrossSellV186 = true;
   const GIFT_VARIANT = 64098152481098;
   const ROOT = ((window.Shopify && window.Shopify.routes && window.Shopify.routes.root) || "/").replace(/\/?$/, "/");
-  const SEEN_KEY = "lff_offer_seen_v186";
+  const SEEN_KEY = "lff_offer_seen_v187";
   const RECENT_KEY = "lff_recent_handles_v186";
   const MAX_RECENT = 18;
   const productCache = new Map();
@@ -89,56 +89,49 @@
     if (typeof img === "string") return img;
     return img && (img.src || img.url) || "";
   }
-  async function candidatesFor(cart) {
-    const physical = (cart.items || []).filter(x => Number(x.variant_id) !== GIFT_VARIANT);
-    const originalHandles = new Set(physical.map(x => String(x.handle || "")));
-    const originalIds = new Set(physical.map(x => Number(x.variant_id)));
-    const seed = await Promise.all(physical.slice(0,2).map(x => getProduct(x.handle)));
-    const kinds = new Set(seed.filter(Boolean).map(kindOf));
-    const handles = new Map();
-    const add = (handle, score) => {
-      if (!handle || originalHandles.has(handle) || handles.has(handle)) return;
-      handles.set(handle, {handle, score});
-    };
-    const families = [];
-    seed.forEach(p => {
-      if (!p) return;
-      const category = categoryOf(p), family = familyOf(p);
-      if (category && family && !families.some(f => f.category === category && f.family === family)) {
-        families.push({category, family});
+  // 1 SQL lookup, then at most two parallel rounds of Shopify product JSON.
+  async function candidatesFor(cart){
+    const physical=(cart.items||[]).filter(x=>Number(x.variant_id)!==GIFT_VARIANT);
+    const used=new Set(physical.map(x=>String(x.handle||"")));
+    const originals=new Set((cart.items||[]).map(x=>Number(x.variant_id)));
+    const handles=[...used].filter(Boolean).slice(0,10);
+    const ordered=[];
+    function add(handle){
+      if(typeof handle!=="string"||!/^[a-z0-9][a-z0-9-]{1,119}$/i.test(handle)||used.has(handle)||ordered.includes(handle))return;
+      ordered.push(handle);
+    }
+    try{
+      const url=route("apps/lff/offer-recommendations")+"?handles="+encodeURIComponent(handles.join(","));
+      const result=await jsonFetch(url,{},3200);
+      if(result?.ok&&Array.isArray(result.handles))result.handles.slice(0,24).forEach(add);
+    }catch(error){console.warn("[LFF V187 offers]",error?.message||error);}
+    getSession(RECENT_KEY,[]).slice(0,8).forEach(item=>add(item.handle));
+    if(ordered.length<4&&physical[0]?.product_id){
+      try{
+        const result=await jsonFetch(route("recommendations/products.json")+"?product_id="+encodeURIComponent(String(physical[0].product_id))+"&limit=10&intent=related",{},2200);
+        (result.products||[]).forEach(item=>add(item.handle));
+      }catch{}
+    }
+    const chosen=[];
+    for(let i=0;i<Math.min(ordered.length,20)&&chosen.length<4;i+=8){
+      const products=await Promise.all(ordered.slice(i,i+8).map(getProduct));
+      for(const p of products){
+        if(chosen.length>=4)break;
+        if(!eligibleProduct(p))continue;
+        const choices=variantChoices(p).filter(v=>!originals.has(Number(v.id)));
+        if(choices.length)chosen.push({product:p,choices,score:100-i});
       }
-    });
-    await Promise.all(families.slice(0,2).map(async f => {
-      try {
-        const query = "?category=" + encodeURIComponent(f.category) + "&family=" + encodeURIComponent(f.family) + "&phase=initial";
-        const data = await jsonFetch(route("apps/lff/catalog-lite") + query, {}, 4500);
-        (data.products || []).forEach((p, index) => add(p.handle, 100 - index + (kinds.has(kindOf(p)) ? 0 : 40)));
-      } catch {}
-    }));
-    const viewed = getSession(RECENT_KEY, []).slice(0,MAX_RECENT);
-    viewed.forEach((v, i) => add(v.handle, 80 - i));
-    // Shopify native recommendations as bounded fallback; never fetch all 119 mockups.
-    if (handles.size < 9 && physical[0]?.product_id) {
-      try {
-        const id = String(physical[0].product_id);
-        const data = await jsonFetch(route("recommendations/products.json") + "?product_id=" + encodeURIComponent(id) + "&limit=10&intent=related", {}, 3500);
-        (data.products || []).forEach((p, i) => add(p.handle, 35 - i));
-      } catch {}
     }
-    const ordered = [...handles.values()].sort((a,b) => b.score - a.score).slice(0,18);
-    const chosen = [];
-    // Four lightweight parallel product lookups per batch; stop when four are valid.
-    for (let offset = 0; offset < ordered.length && chosen.length < 4; offset += 4) {
-      const slice = ordered.slice(offset, offset + 4);
-      const items = await Promise.all(slice.map(x => getProduct(x.handle)));
-      items.forEach((product, j) => {
-        if (!eligibleProduct(product) || chosen.length >= 4) return;
-        if (originalIds.has(Number(variantChoices(product)[0]?.id))) return;
-        chosen.push({product, choices:variantChoices(product), score:slice[j].score});
-      });
-    }
-    // Prefer different article types from the current cart, while preserving family priority.
-    return chosen.sort((a,b) => (b.score + (kinds.has(kindOf(b.product))?0:20)) - (a.score + (kinds.has(kindOf(a.product))?0:20))).slice(0,4);
+    return chosen.slice(0,4);
+  }
+  let warmCandidates=null;
+  function cartSignature(cart){return (cart.items||[]).filter(x=>Number(x.variant_id)!==GIFT_VARIANT).map(x=>String(x.variant_id)).sort().join(",");}
+  function recommendations(cart){
+    const key=cartSignature(cart);
+    if(warmCandidates&&warmCandidates.key===key&&Date.now()-warmCandidates.created<60000)return warmCandidates.promise;
+    const promise=candidatesFor(cart);
+    warmCandidates={key,created:Date.now(),promise};
+    return promise;
   }
   function closeOverlay() {
     if (!overlay) return;
@@ -276,13 +269,22 @@
       selected = new Set();
       setSession(SEEN_KEY, true);
       createOverlay();
-      const offers = await candidatesFor(cart);
+      const offers = await recommendations(cart);
       if (!overlay) return;
-      if (!offers.length) { status("No hay recomendaciones disponibles ahora. Puedes continuar directamente al pago."); return; }
+      if (!offers.length) { status("No se han podido cargar ofertas ahora. Puedes continuar directamente al pago."); return; }
       offers.forEach(appendCard);
       status("Tus artículos originales mantienen su precio. Solo los nuevos extras seleccionados reciben la oferta.");
     } catch { return normalCheckout(); }
     finally { opening = false; }
+  }
+  // Warm a small, bounded offer set after the cart page is ready.
+  // Nothing extra is downloaded at homepage initial render.
+  if(/^\/cart\/?$/.test(location.pathname)){
+    const preload=()=>{ void jsonFetch(route("cart.js"),{},2200)
+      .then(cart=>{if((cart.items||[]).some(x=>Number(x.variant_id)!==GIFT_VARIANT))return recommendations(cart);})
+      .catch(()=>{}); };
+    if(document.readyState==="complete")setTimeout(preload,700);
+    else window.addEventListener("load",()=>setTimeout(preload,700),{once:true});
   }
   const matchingButton = e => e.target.closest("#lffCheckoutBtn, button[name='checkout']");
   document.addEventListener("click", e => {
