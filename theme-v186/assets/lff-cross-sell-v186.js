@@ -72,7 +72,7 @@
     const v = norm((product.product_type || product.productType || "") + " " + tagsOf(product).find(t => /^LFF_PRODUCT_TYPE:/i.test(t)) + " " + (product.title || ""));
     if (/poster|lamina|cuadro/.test(v)) return "poster";
     if (/taza|mug/.test(v)) return "taza";
-    if (/textil|ropa|camiseta|camisa|sudadera/.test(v)) return "textil";
+    if (/textil|ropa|camiseta|camisa|sudadera|merchandising lff/.test(v)) return "textil";
     return "otros";
   }
   function eligibleProduct(p) {
