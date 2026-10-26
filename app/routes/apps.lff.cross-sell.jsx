@@ -1,5 +1,5 @@
 // LFF V186 — one-use, variant-scoped, short-lived cross-sell discounts.
-// Staged separately from v73-postgres: deploy only after checkout testing.
+// Shopify app-proxy validates variants; GraphQL query strings must not be prefixed by a same-line # comment.
 import { randomBytes } from "node:crypto";
 import { authenticate } from "../shopify.server";
 
@@ -12,8 +12,8 @@ const MAX_PER_IP = 4;
 const MAX_PER_SHOP = 100;
 const HEADERS = { "Cache-Control": "no-store", "Content-Type": "application/json; charset=utf-8" };
 
-const eligibleVariantsQuery = "#graphql query LffEligibleOfferVariants($ids:[ID!]!,$pub:ID!){nodes(ids:$ids){...on ProductVariant{id availableForSale price product{id status title productType tags publishedOnPublication(publicationId:$pub)}}}}";
-const issueDiscountMutation = "#graphql mutation LffIssueOffer($input:DiscountCodeBasicInput!){discountCodeBasicCreate(basicCodeDiscount:$input){codeDiscountNode{id} userErrors{field code message}}}";
+const eligibleVariantsQuery = "query LffEligibleOfferVariants($ids:[ID!]!,$pub:ID!){nodes(ids:$ids){...on ProductVariant{id availableForSale price product{id status title productType tags publishedOnPublication(publicationId:$pub)}}}}";
+const issueDiscountMutation = "mutation LffIssueOffer($input:DiscountCodeBasicInput!){discountCodeBasicCreate(basicCodeDiscount:$input){codeDiscountNode{id} userErrors{field code message}}}";
 
 function failure(message, status = 400) {
   return Response.json({ ok: false, error: message }, { status, headers: HEADERS });
