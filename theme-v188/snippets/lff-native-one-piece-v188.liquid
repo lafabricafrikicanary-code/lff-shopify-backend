@@ -1,0 +1,73 @@
+{{ 'lff-native-one-piece-v188.css' | asset_url | stylesheet_tag }}
+<section class="lf-commerce lffNativePilot" data-lff-native="v188">
+  <div class="lffNativeKicker">PRUEBA PRIVADA · CATÁLOGO NATIVO</div>
+  <h1>One Piece <span>· Directamente desde Shopify</span></h1>
+  <p class="lffNativeIntro">Las portadas y precios de esta prueba se sirven desde Shopify, sin consultas al backend de Render. La V187 pública no ha cambiado.</p>
+  {% paginate collection.products by 250 %}
+    <div class="lffNativeMeta">{{ collection.products_count }} productos en la colección · Portadas iniciales: 4 por tipo</div>
+    {% assign lff_native_kinds = 'ropa,taza' | split: ',' %}
+    {% for lff_kind in lff_native_kinds %}
+      {% assign lff_total = 0 %}
+      {% capture lff_hidden_cards %}
+        {% for product in collection.products %}
+          {% assign lff_mug = false %}
+          {% if product.type contains 'Taza' or product.tags contains 'LFF_PRODUCT_TYPE:TAZA' %}
+            {% assign lff_mug = true %}
+          {% endif %}
+          {% assign lff_match = false %}
+          {% if lff_kind == 'taza' and lff_mug %}
+            {% assign lff_match = true %}
+          {% elsif lff_kind == 'ropa' and lff_mug == false %}
+            {% assign lff_match = true %}
+          {% endif %}
+          {% if lff_match %}
+            {% assign lff_total = lff_total | plus: 1 %}
+            {% if lff_total > 4 %}
+              {% render 'lff-native-one-piece-card-v188', product: product %}
+            {% endif %}
+          {% endif %}
+        {% endfor %}
+      {% endcapture %}
+      {% if lff_total > 0 %}
+        <div class="lffNativeGroup" data-lff-group="{{ lff_kind }}">
+          <div class="lffNativeHeading">
+            <h2>{% if lff_kind == 'taza' %}Tazas{% else %}Ropa y diseños{% endif %}</h2>
+            <span>{{ lff_total }} artículos</span>
+          </div>
+          <div class="lffNativeGrid">
+            {% assign lff_initial = 0 %}
+            {% for product in collection.products %}
+              {% assign lff_mug = false %}
+              {% if product.type contains 'Taza' or product.tags contains 'LFF_PRODUCT_TYPE:TAZA' %}
+                {% assign lff_mug = true %}
+              {% endif %}
+              {% assign lff_match = false %}
+              {% if lff_kind == 'taza' and lff_mug %}
+                {% assign lff_match = true %}
+              {% elsif lff_kind == 'ropa' and lff_mug == false %}
+                {% assign lff_match = true %}
+              {% endif %}
+              {% if lff_match and lff_initial < 4 %}
+                {% render 'lff-native-one-piece-card-v188', product: product %}
+                {% assign lff_initial = lff_initial | plus: 1 %}
+              {% endif %}
+            {% endfor %}
+          </div>
+          {% if lff_total > 4 %}
+            <template class="lffNativePending">{{ lff_hidden_cards }}</template>
+            <button class="lffNativeMore" type="button">Ver más · {{ lff_total | minus: 4 }} artículos</button>
+          {% endif %}
+        </div>
+      {% endif %}
+    {% endfor %}
+    {% if paginate.pages > 1 %}
+      <nav class="lffNativePagination" aria-label="Más productos">
+        {% if paginate.previous %}<a href="{{ paginate.previous.url }}">Anterior</a>{% endif %}
+        <span>Página {{ paginate.current_page }} de {{ paginate.pages }}</span>
+        {% if paginate.next %}<a href="{{ paginate.next.url }}">Siguiente</a>{% endif %}
+      </nav>
+    {% endif %}
+  {% endpaginate %}
+  <p class="lffNativeFootnote">Prueba aislada: el administrador, los descuentos y los demás portales mantienen su funcionamiento habitual.</p>
+</section>
+<script src="{{ 'lff-native-one-piece-v188.js' | asset_url }}" defer></script>
