@@ -1,0 +1,59 @@
+{% if collection.handle == 'lff-one-piece-native-test' %}
+{% render 'lff-native-one-piece-v188' %}
+{% else %}
+
+<section class="lf-commerce lf-collection-v28">
+  <div class="kicker">colección</div>
+  <h1>{{ collection.title }}</h1>
+  {% if collection.description != blank %}<div class="lf-rte">{{ collection.description }}</div>{% endif %}
+
+  <form class="lf-collection-tools-v28" method="get">
+    <div class="lf-filter-groups">
+      {% for filter in collection.filters %}
+        <details>
+          <summary>{{ filter.label }}</summary>
+          <div>
+            {% case filter.type %}
+              {% when 'boolean', 'list' %}
+                {% for value in filter.values %}
+                  <label><input type="checkbox" name="{{ value.param_name }}" value="{{ value.value }}" {% if value.active %}checked{% endif %}> {{ value.label }} ({{ value.count }})</label>
+                {% endfor %}
+              {% when 'price_range' %}
+                <label>Desde <input name="{{ filter.min_value.param_name }}" type="number" min="0" value="{{ filter.min_value.value | money_without_currency | replace: ',', '.' }}"></label>
+                <label>Hasta <input name="{{ filter.max_value.param_name }}" type="number" min="0" value="{{ filter.max_value.value | money_without_currency | replace: ',', '.' }}"></label>
+            {% endcase %}
+          </div>
+        </details>
+      {% endfor %}
+    </div>
+    <label>ORDENAR
+      <select name="sort_by" onchange="this.form.submit()">
+        {% assign sort_by = collection.sort_by | default: collection.default_sort_by %}
+        {% for option in collection.sort_options %}<option value="{{ option.value }}" {% if option.value == sort_by %}selected{% endif %}>{{ option.name }}</option>{% endfor %}
+      </select>
+    </label>
+    <button type="submit">APLICAR FILTROS</button>
+  </form>
+
+  {% paginate collection.products by 24 %}
+    <div class="lf-collection-grid">
+      {% for product in collection.products %}
+        {% assign lff_card_image = product.featured_image %}
+        {% for lff_media in product.media %}{% if lff_media.media_type == 'image' and lff_media.alt contains 'LFF_PORTADA::' %}{% assign lff_card_image = lff_media.preview_image %}{% endif %}{% endfor %}
+        <article class="lf-product-card">
+          <a href="{{ product.url }}">
+            {% if lff_card_image %}{{ lff_card_image | image_url: width: 700 | image_tag: loading: 'lazy', widths: '280,420,560,700', alt: product.title }}{% endif %}
+            <h2>{{ product.title }}</h2>
+            <p>{% if product.compare_at_price_max > product.price %}<s>{{ product.compare_at_price_max | money }}</s>{% endif %} {{ product.price | money }}</p>
+          </a>
+          <button type="button" data-wishlist-item data-wishlist-id="{{ product.id }}" data-wishlist-title="{{ product.title | escape }}" data-wishlist-handle="{{ product.handle | escape }}" data-wishlist-image="{% if lff_card_image %}{{ lff_card_image | image_url: width: 300 }}{% endif %}">♡ FAVORITO</button>
+        </article>
+      {% else %}<p>No hay productos todavía.</p>{% endfor %}
+    </div>
+    {% if paginate.pages > 1 %}
+      <nav class="lf-pagination" aria-label="Paginación">{% if paginate.previous %}<a href="{{ paginate.previous.url }}">← ANTERIOR</a>{% endif %}<span>{{ paginate.current_page }} / {{ paginate.pages }}</span>{% if paginate.next %}<a href="{{ paginate.next.url }}">SIGUIENTE →</a>{% endif %}</nav>
+    {% endif %}
+  {% endpaginate %}
+</section>
+{% endif %}
+{% schema %}{"name":"Colección principal V28","settings":[]}{% endschema %}
