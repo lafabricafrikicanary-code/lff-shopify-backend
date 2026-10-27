@@ -1,0 +1,25 @@
+{% liquid
+  assign lff_native_img = product.featured_image
+  for m in product.media
+    if m.media_type == 'image' and m.alt contains 'LFF_PORTADA::'
+      assign lff_native_img = m.preview_image
+      break
+    endif
+  endfor
+  if lff_native_img == blank
+    assign lff_native_img = product.images.first
+  endif
+%}
+<article class="lffNativeCard">
+  <a href="{{ product.url }}" class="lffNativeCardLink" aria-label="Ver {{ product.title | escape }}">
+    <span class="lffNativeThumb">
+      {% if lff_native_img != blank %}
+        {{ lff_native_img | image_url: width: 560 | image_tag: loading: 'lazy', widths: '180,280,420,560', sizes: '(max-width: 680px) 45vw, (max-width: 1024px) 28vw, 220px', alt: product.title, decoding: 'async' }}
+      {% else %}
+        <span class="lffNativeMissing">Portada en preparación</span>
+      {% endif %}
+    </span>
+    <span class="lffNativeCardTitle">{{ product.title | escape }}</span>
+    <span class="lffNativeCardPrice">{{ product.price | money }}</span>
+  </a>
+</article>
