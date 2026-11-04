@@ -239,6 +239,10 @@
     const q=norm(question),character=detectCharacterMatch(question,family);
     const where=character?character+" ("+family.name+")":family.name;
     const open="Te llevo a "+family.name+" para que veas los diseños y productos reales de la tienda.";
+    if(/quien es|quien era|de que serie|de que anime|de que pelicula|de que juego|de donde es|de donde sale|en que serie|en que pelicula/.test(q)){
+      if(character)return character+' pertenece al universo de '+family.name+'. Si buscas algún regalo o diseño relacionado, '+open.charAt(0).toLowerCase()+open.slice(1);
+      return 'He reconocido '+family.name+' en la sección '+family.category+'. '+open;
+    }
     if(/taza|tazas|mug|ceramica|vaso/.test(q))return "¡Vamos a buscar tazas de "+where+"! "+open+" Comprueba las opciones disponibles en cada ficha.";
     if(/sudadera|hoodie|sweatshirt/.test(q))return "¡Vamos a mirar sudaderas de "+where+"! "+open+" Si un diseño admite sudadera, podrás seleccionarla dentro del producto.";
     if(/camiseta|camisa|playera|ropa|top|prenda/.test(q))return "Te ayudo a encontrar ropa de "+where+". "+open+" Dentro de cada producto eliges modelo, color y talla.";
@@ -281,8 +285,11 @@
     return'';
   }
   function localReply(q){
+    localTopic='';
     const s=norm(q);
     if(/sirenita|sirena ariel|ariel disney/.test(s))return "La Sirenita pertenece a Disney. Si no consigo abrir su familia, entra en Disney y busca La Sirenita; también puedes escribir Ariel.";
+    if(/pagar al recibir|pago al recibir|contra reembolso|pago en efectivo|cobro en casa|entrega en mano/.test(s)){localTopic='cash_delivery';return 'Si estás en Gran Canaria, escríbenos por WhatsApp para consultar si podemos organizar entrega en mano y pago al recibirlo. Lo confirmaremos según la zona.';}
+    if(/como compro|como hacer un pedido|agregar al carrito|anadir al carrito|añadir al carrito|carrito de compra|finalizar compra/.test(s)){localTopic='buy';return 'Abre el producto, elige las opciones disponibles y añádelo al carrito. Después revisa el pedido y las formas de pago en el checkout.';}
     if(/regalo|regalar|cumpleanos|cumple|hijo|hija|nieto|nieta|pareja|sobrino|amigo invisible|navidad|reyes/.test(s)){localTopic='gift';return "¡Te ayudo a acertar! Dime qué personaje, película, anime o videojuego le gusta. Si no lo sabes, dime su edad aproximada y si prefieres camiseta, sudadera o taza.";}
     if(/taza|tazas|mug|poster|posteres|lamina|cuadro|camiseta|sudadera|ropa|camisa/.test(s)){localTopic='products';return "Tenemos diseños en distintas clases de productos. Dime la saga o personaje que buscas y te llevo a su familia; las opciones reales se ven en cada ficha.";}
     if(/envio|enbio|entrega|portes|cuanto tarda|reparto|domicilio/.test(s)){localTopic='shipping';return "Los costes y opciones de envío dependen del destino y aparecen en el checkout. En algunas zonas también hay entrega en mano; consulta tu dirección antes de pagar.";}
@@ -291,12 +298,17 @@
     if(/talla|medida|guia de talla/.test(s)){localTopic='sizes';return "En cada diseño elige Modelo, Color y Talla. Las medidas y combinaciones dependen del modelo seleccionado.";}
     if(/precio|cuanto cuesta|cuanto vale|precios|barato/.test(s)){localTopic='prices';return "El precio actualizado se muestra en la ficha de cada producto y en el checkout.";}
     if(/stock|agotado|disponib|existencias/.test(s)){localTopic='stock';return "La disponibilidad depende de cada artículo y variante. Selecciona Modelo, Color y Talla en la ficha.";}
+    if(/personalizar|personalizado|poner mi nombre|mi foto|mi diseno|diseno propio/.test(s)){localTopic='customization';return 'Si quieres un diseño personalizado, escríbenos por WhatsApp para ver si podemos prepararlo y cuáles son las opciones.';}
+    if(/envolver para regalo|envoltorio|caja de regalo|presentacion de regalo/.test(s)){localTopic='gift_wrapping';return 'En algunas compras puedes seleccionar la preparación para regalo; revisa las opciones y el importe antes de pagar.';}
+    if(/original|oficial|licencia|licenciado|autentico/.test(s)){localTopic='licenses';return 'Consulta la descripción de cada producto para saber sus características. No te confirmaré que sea merchandising con licencia oficial si la ficha no lo indica.';}
     if(/descuento|cupon|codigo|promocion|oferta/.test(s)){localTopic='discounts';return "Si tienes un código promocional, introdúcelo en el checkout. Comprueba sus condiciones y fecha de validez.";}
     if(/pago|pagar|tarjeta|paypal|efectivo|dat[aá]fono/.test(s)){localTopic='payments';return "Los métodos disponibles se muestran en el checkout. No compartas datos bancarios en este chat.";}
     if(/arcade|llave|juego friki/.test(s)){localTopic='arcade';return "En Arcade puedes participar en juegos y consultar las recompensas vigentes dentro de esa sección.";}
     if(/club/.test(s)){localTopic='club';return "El Club Friki es nuestra zona de comunidad y novedades. Puedes consultar las opciones de registro allí.";}
     if(/b2b|mayorista|empresa|zona profesional|al por mayor/.test(s)){localTopic='b2b';return "Si tienes una tienda o empresa, entra en Tiendas para conocer la zona profesional y sus opciones.";}
     if(/whats|telefono|contact|persona|humano|soporte/.test(s)){localTopic='contact';return "Puedes escribirnos desde el enlace de WhatsApp del chat o entrando en Nosotros & contacto.";}
+    if(/recibir factura|pedir factura|facturacion/.test(s)){localTopic='invoice';return 'Para una factura de un pedido, contacta con soporte indicando el número de pedido. No compartas datos sensibles por este chat.';}
+    if(/opinion|opiniones|resena|reseñas|valoracion/.test(s)){localTopic='reviews';return 'Las reseñas y valoraciones, cuando estén disponibles, se consultan en la ficha de cada producto.';}
     if(/disney|pixar|marvel|videojuego|gaming|anime|manga|multiusos|peliculas|series/.test(s)){localTopic='categories';return "Tenemos Anime & Manga, Gaming, Disney y Multiusos. Dime una saga o un personaje y te llevaré a su familia sin adivinar.";}
     return "No quiero llevarte a una familia equivocada. ¿Me escribes el nombre de la saga o personaje, o me dices si necesitas ayuda con un pedido o regalo?";
   }
@@ -309,6 +321,8 @@
     if(family){
       return{reply:familyContextReply(question,family),mode:'family',family};
     }
+    const prepared=localReply(question);
+    if(localTopic)return{reply:prepared,mode:'local-faq',intent:localTopic};
     if(location.protocol==='http:'||location.protocol==='https:'){
       for(const endpoint of ENDPOINTS){
         try{
@@ -317,7 +331,7 @@
         }catch(e){}
       }
     }
-    return{reply:localReply(question),mode:'local'};
+    return{reply:prepared,mode:'local'};
   }
   async function ask(question){
     const q=String(question||'').trim();if(!q)return;openAssistant();addMessage('user',q);input.value='';
