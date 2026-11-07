@@ -250,7 +250,7 @@ function send(category, row, cacheStatus, status = 200) {
     ok: true, category, products: row.products, cached: cacheStatus !== "fresh",
     cacheStatus, lastUpdated: row.updatedAt,
   }, { status, headers: {
-    "Cache-Control": "public, max-age=45, stale-while-revalidate=300",
+    "Cache-Control": "no-store",
     "X-LFF-Catalog-Cache": cacheStatus,
   } });
 }
