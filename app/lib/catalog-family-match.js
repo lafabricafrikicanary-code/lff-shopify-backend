@@ -26,6 +26,7 @@ const FAMILY_NAMES = [
   ["ghostbusters", "cazafantasmas"],
   ["dc universe", "dc comics"],
   ["warhammer 40 000", "warhammer 40", "warhammer 40k", "warhammer 40000"],
+  ["karate kid cobra kai", "karate kid", "cobra kai"],
   ["game of thrones house of the dragon", "game of thrones", "house of the dragon"],
   ["harry potter wizarding world", "harry potter", "wizarding world"],
   ["godzilla x kong monsterverse", "monsterverse", "godzilla x kong"],
