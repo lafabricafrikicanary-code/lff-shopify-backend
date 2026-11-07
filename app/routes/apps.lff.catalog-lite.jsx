@@ -1,6 +1,7 @@
 import { authenticate, unauthenticated } from "../shopify.server";
 import prisma from "../db.server";
 import { familyCatalogTaxonomy, publicCategoryMatch } from "../lib/catalog-public-taxonomy.server";
+import { matchesProductFamily } from "../lib/catalog-family-match.js";
 
 // V140 · Cached public catalog by category. PostgreSQL snapshots are shared
 // between browsers, survive Render restarts and never store galleries/variants.
@@ -11,9 +12,9 @@ const CATEGORY = {
   multiverse: { tags: ["multiusos", "multiverso", "multiverse", "multiusos-multiverso"], names: ["multiusos", "multiverso", "multiverse", "multiusos multiverso"] },
 };
 
-const REFRESH_AFTER_MS = 5 * 60_000; // avoid a full Shopify scan every minute
+const REFRESH_AFTER_MS = 90_000; // avoid a full Shopify scan every minute
 const MAX_STALE_MS = 6 * 60 * 60_000;  // don't silently serve very old stock indefinitely
-const RAM_CACHE_MS = 90_000; // serve family batches without repeated PostgreSQL reads
+const RAM_CACHE_MS = 30_000; // serve family batches without repeated PostgreSQL reads
 const ram = new Map();
 const refreshing = new Map();
 const refreshRetryAfter = new Map();
@@ -147,26 +148,11 @@ async function listCategory(admin, category, shop) {
   });
 }
 // V126: fast family slices from PostgreSQL; never fetch the full product gallery.
-function familyKey(v) { return norm(v).replace(/\s+/g, "-"); }
-function matchesFamily(p, rawFamily) {
-  const goal=familyKey(rawFamily);
-  if(!goal)return false;
-  const tags=Array.isArray(p.tags)?p.tags:[];
-  // Normalizar nombres importados: «Naruto» / «Naruto Shippuden»;
-  // «DanDaDan» / «Dan Da Dan», sin asignar One Piece por palabras sueltas.
-  const related=value=>{
-    const key=familyKey(value);
-    if(!key)return false;
-    if(key===goal||key.replace(/-/g,"")===goal.replace(/-/g,""))return true;
-    const shorter=key.length<goal.length?key:goal;
-    const longer=key.length<goal.length?goal:key;
-    return shorter.length>=5&&longer.startsWith(shorter+"-");
-  };
-  if(related(p.family))return true;
-  return tags.some(t=>{
-    const raw=String(t||"");
-    return related(raw.replace(/^LFF_FAMILY:/i,""));
-  });
+// V191: only the declared product family (or an explicitly curated synonym)
+// can match. Never use freeform tags or substring/prefix matching.
+function familyKey(value) { return norm(value).replace(/\s+/g, "-"); }
+function matchesFamily(product, requestedFamily) {
+  return matchesProductFamily(product, requestedFamily);
 }
 function productKindLite(p) {
   const tags=Array.isArray(p.tags)?p.tags:[];
@@ -218,7 +204,7 @@ function sendFamily(category,row,params,cacheStatus){
     total:selected.length,hasMore,nextOffset,lastUpdated:row.updatedAt,
     cacheStatus
   },{headers:{
-    "Cache-Control":"public, max-age=45, stale-while-revalidate=300",
+    "Cache-Control":"no-store",
     "X-LFF-Catalog-Cache":cacheStatus
   }});
 }
@@ -265,7 +251,7 @@ function send(category, row, cacheStatus, status = 200) {
     ok: true, category, products: row.products, cached: cacheStatus !== "fresh",
     cacheStatus, lastUpdated: row.updatedAt,
   }, { status, headers: {
-    "Cache-Control": "public, max-age=45, stale-while-revalidate=300",
+    "Cache-Control": "no-store",
     "X-LFF-Catalog-Cache": cacheStatus,
   } });
 }
