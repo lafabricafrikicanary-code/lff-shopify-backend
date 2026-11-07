@@ -25,7 +25,7 @@ test('keep genuine family synonyms and imported spellings', () => {
     ['The Apothecary Diaries', 'Los diarios de la boticaria'],
     ['Monsters', 'Monsters, Inc.'], ['DC Comics', 'DC Universe'],
     ['Game of Thrones', 'Game of Thrones / House of the Dragon'],
-    ['Naruto', 'Naruto / Naruto Shippuden'], ['La Sirenita', 'The Little Mermaid']
+    ['Naruto', 'Naruto / Naruto Shippuden'], ['Cobra Kai', 'Karate Kid / Cobra Kai'], ['La Sirenita', 'The Little Mermaid']
   ]) {
     assert.equal(matchesProductFamily(product(actual), displayed), true, actual + ' -> ' + displayed);
   }
