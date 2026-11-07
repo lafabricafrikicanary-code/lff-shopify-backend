@@ -1,0 +1,23 @@
+name: LFF backend build smoke test
+on:
+  push:
+    branches: [v73-postgres, fix/v191-catalog-family-integrity]
+  pull_request:
+    branches: [v73-postgres]
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    env:
+      DATABASE_URL: postgresql://ci:ci@127.0.0.1:5432/lff_ci
+      SHOPIFY_API_KEY: dummy-ci-key
+      SHOPIFY_API_SECRET: dummy-ci-secret
+      SHOPIFY_APP_URL: https://example.com
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: npm install
+      - run: npx prisma generate && npx prisma validate
+      - run: node --test tests/catalog-family-integrity.test.mjs
+      - run: npm run build
