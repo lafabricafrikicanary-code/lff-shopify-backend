@@ -150,6 +150,7 @@ async function listCategory(admin, category, shop) {
 // V126: fast family slices from PostgreSQL; never fetch the full product gallery.
 // V191: only the declared product family (or an explicitly curated synonym)
 // can match. Never use freeform tags or substring/prefix matching.
+function familyKey(value) { return norm(value).replace(/\s+/g, "-"); }
 function matchesFamily(product, requestedFamily) {
   return matchesProductFamily(product, requestedFamily);
 }
