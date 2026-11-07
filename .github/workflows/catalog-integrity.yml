@@ -1,0 +1,15 @@
+name: LFF catalog integrity
+on:
+  push:
+    branches: [v73-postgres, fix/v191-catalog-family-integrity]
+  pull_request:
+    branches: [v73-postgres]
+jobs:
+  family-routing:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: node --test tests/catalog-family-integrity.test.mjs
