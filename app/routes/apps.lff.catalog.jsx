@@ -1,5 +1,6 @@
 import { authenticate, unauthenticated } from "../shopify.server";
 import { familyCatalogTaxonomy } from "../lib/catalog-public-taxonomy.server";
+import { matchesProductFamily } from "../lib/catalog-family-match.js";
 
 function safeMoney(amount, currencyCode = "EUR") {
   const value = Number(amount || 0);
@@ -58,22 +59,9 @@ function requestedFamilyKeys(url) {
   return [...new Set(values.map(normalizeFamilyValue).filter(Boolean))];
 }
 
+// V191: explicit family identity, never free text product tags.
 function productMatchesFamily(product, keys = []) {
-  if (!keys.length) return true;
-  const family = normalizeFamilyValue(product?.family || "");
-  if (family && keys.some((key) => family === key || family.includes(key) || key.includes(family))) return true;
-
-  const tags = Array.isArray(product?.tags) ? product.tags : [];
-  for (const raw of tags) {
-    const tag = String(raw || "");
-    if (/^LFF_FAMILY:/i.test(tag)) {
-      const taggedFamily = normalizeFamilyValue(tag.replace(/^LFF_FAMILY:/i, ""));
-      if (taggedFamily && keys.some((key) => taggedFamily === key || taggedFamily.includes(key) || key.includes(taggedFamily))) return true;
-    }
-    const normalizedTag = normalizeFamilyValue(tag);
-    if (normalizedTag && keys.some((key) => normalizedTag === key)) return true;
-  }
-  return false;
+  return !keys.length || keys.some(key => matchesProductFamily(product, key));
 }
 
 const CATALOG_CACHE_MS = 20_000;
@@ -181,7 +169,7 @@ export const loader = async ({ request }) => {
         source: familyKeys.length ? "admin-online-store-publication-family" : "admin-online-store-publication",
         forcedRefresh: forceRefresh,
       },
-      { headers: { "Cache-Control": "public, max-age=30, stale-while-revalidate=120" } },
+      { headers: { "Cache-Control": "no-store" } },
     );
   } catch (error) {
     console.error("[LFF CATALOG]", error);
