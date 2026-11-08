@@ -1,7 +1,7 @@
 import { authenticate, unauthenticated } from "../shopify.server";
 import prisma from "../db.server";
 import { familyCatalogTaxonomy, publicCategoryMatch } from "../lib/catalog-public-taxonomy.server";
-import { matchesProductFamily } from "../lib/catalog-family-match.js";
+import { matchesProductFamily, catalogProductKind } from "../lib/catalog-family-match.js";
 
 // V140 · Cached public catalog by category. PostgreSQL snapshots are shared
 // between browsers, survive Render restarts and never store galleries/variants.
@@ -150,29 +150,10 @@ async function listCategory(admin, category, shop) {
 // V126: fast family slices from PostgreSQL; never fetch the full product gallery.
 // V191: only the declared product family (or an explicitly curated synonym)
 // can match. Never use freeform tags or substring/prefix matching.
-function familyKey(value) { return norm(value).replace(/\s+/g, "-"); }
 function matchesFamily(product, requestedFamily) {
   return matchesProductFamily(product, requestedFamily);
 }
-function productKindLite(p) {
-  const tags=Array.isArray(p.tags)?p.tags:[];
-  const declared=tags.find(t=>/^LFF_PRODUCT_TYPE:/i.test(String(t||"")));
-  const hint=norm(declared?String(declared).split(":").slice(1).join(":"):"");
-  const title=norm(p.title),productType=norm(p.productType);
-  const classify=x=>{
-    if(/poster|lamina|cuadro/.test(x))return "poster";
-    if(/taza|mug/.test(x))return "taza";
-    if(/textil|ropa|camiseta|camisa|sudadera|hoodie|crop top|apparel/.test(x))return "textil";
-    return "";
-  };
-  if(hint)return classify(hint)||familyKey(hint).slice(0,65);
-  if(/poster|lamina|cuadro/.test(title))return "poster";
-  if(/taza|mug/.test(title))return "taza";
-  if(classify(productType))return classify(productType);
-  if(/merchandising lff/.test(productType))return "textil";
-  if(classify(title))return classify(title);
-  return productType?familyKey(productType).slice(0,65):"otros";
-}
+const productKindLite = catalogProductKind;
 function sendFamily(category,row,params,cacheStatus){
   const family=String(params.get("family")||"").trim().slice(0,120);
   const phase=params.get("phase")==="more"?"more":"initial";
