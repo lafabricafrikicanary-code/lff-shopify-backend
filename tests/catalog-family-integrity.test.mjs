@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { matchesProductFamily, catalogFamilyIdentity } from '../app/lib/catalog-family-match.js';
+import { matchesProductFamily, catalogFamilyIdentity, catalogProductKind } from '../app/lib/catalog-family-match.js';
 
 const product = (family, extra = [], category = 'Disney') => ({
   family, category, tags: [...extra, 'LFF_CATEGORY:' + category, 'LFF_FAMILY:' + family]
@@ -43,4 +43,28 @@ test('unknown and empty family are not assigned by guessing', () => {
   assert.equal(matchesProductFamily(null,'Naruto'), false);
   assert.equal(catalogFamilyIdentity('Disney Villains'), 'disney villains');
   assert.notEqual(catalogFamilyIdentity('Disney'),catalogFamilyIdentity('Disney Villains'));
+});
+
+test('bilingual and parenthesized Shopify family tags match exact storefront family', () => {
+  for(const [real, portal] of [
+    ['La Bella y la Bestia (Beauty and the Beast)', 'Beauty and the Beast'],
+    ['El Rey León (The Lion King)', 'The Lion King'],
+    ["Frieren: Beyond Journey's End (Sousou no Frieren)", "Frieren: Beyond Journey’s End"],
+    ['Mickey Mouse y sus Amigos (Disney Clásicos)', 'Mickey & Friends'],
+    ['Tarzán (Disney Tarzan)', 'Tarzan']
+  ]) assert.equal(matchesProductFamily(product(real), portal), true, real + ' -> ' + portal);
+});
+test('type inference uses real product metadata before a word hidden in the title', () => {
+  assert.equal(catalogProductKind({title:'La Bella y la Bestia · Una Taza de Magia Eterna', productType:'Merchandising LFF',tags:['LFF_LIGHT_OPTIONS_V1']}),'textil');
+  assert.equal(catalogProductKind({title:'Una Taza de Magia Eterna',productType:'Merchandising LFF',tags:[]}), 'textil');
+  assert.equal(catalogProductKind({title:'Taza One Piece · Secretos de Ohara',productType:'Taza personalizada LFF',tags:['LFF_PRODUCT_TYPE:TAZA']}),'taza');
+  assert.equal(catalogProductKind({title:'Taza Naruto',productType:'Taza personalizada LFF',tags:[]}), 'taza');
+  assert.equal(catalogProductKind({title:'Póster de Dune',productType:'Merchandising LFF',tags:[]}), 'poster');
+  assert.equal(catalogProductKind({title:'One Piece · Monkey D. Luffy',productType:'Camisetas, tops y sudaderas',tags:[]}), 'textil');
+});
+test('new bilingual aliases do not merge neighboring families', () => {
+  assert.equal(matchesProductFamily(product('Sleeping Beauty'), 'Beauty and the Beast'), false);
+  assert.equal(matchesProductFamily(product('The Lion King'), 'Lilo & Stitch'), false);
+  assert.equal(matchesProductFamily(product('Mickey & Friends'), 'Disney Villains'), false);
+  assert.equal(matchesProductFamily(product('Tarzan'), 'The Lion King'), false);
 });
